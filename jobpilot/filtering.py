@@ -230,9 +230,10 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
 def review_only_reasons(posting: JobPosting, cfg) -> list[str]:
     """Reasons ambiguous postings must be human-reviewed before auto-applying.
 
-    A restriction or full-time cue that appears only in the description is too
-    weak to auto-apply on, but too uncertain to discard: the posting stays in
-    the pipeline for scoring and goes to the review queue.
+    A work-authorization restriction, or a full-time cue that clashes with an
+    internship signal, is too uncertain to auto-apply on but too weak to
+    discard: the posting stays in the pipeline for scoring and goes to the
+    review queue.
     """
     reasons: list[str] = []
     loc = assess_location(posting, cfg)

@@ -81,7 +81,7 @@ class Applier:
             return self._to_review(plan, "shortlist_review", "match")
 
         # Guard 2b: an ambiguous classification (a work-authorization restriction
-        # or a full-time cue stated only in the description) is never
+        # or a full-time cue that clashes with an internship signal) is never
         # auto-applied. The posting is still scored and queued for review.
         blockers = review_only_reasons(posting, self.config.filter)
         if blockers:
