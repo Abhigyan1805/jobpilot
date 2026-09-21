@@ -297,6 +297,34 @@ class FilteringTests(unittest.TestCase):
             assessment = assess_location(p, self.cfg.filter)
             self.assertFalse(assessment.auto_apply_ok, phrase)
 
+    def test_about_us_prose_does_not_restrict_india_remote_internship(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "About us: we are a machine learning startup based in India. "
+                "Internship January 2026 - June 2026."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        self.assertTrue(assess_location(p, self.cfg.filter).auto_apply_ok)
+
+    def test_named_country_restriction_in_description_blocks_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Applicants must be based in Canada."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        self.assertFalse(assess_location(p, self.cfg.filter).auto_apply_ok)
+
     def test_onsite_only_india_internship_remains_eligible(self):
         p = posting(
             title="Machine Learning Intern",

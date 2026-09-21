@@ -49,37 +49,6 @@ WORK_AUTH_PROSE_TERMS = [
     "work authorization", "work authorisation",
 ]
 
-# Work-authorization cues that, when they sit near a named region, express a
-# restriction on who may hold the role. Kept separate from the phrase list so
-# unfamiliar phrasings ("must be a US citizen", "US citizenship required",
-# "only open to candidates in Canada") are caught without enumerating them.
-_RESTRICTION_CUES = [
-    "only", "citizen", "citizens", "citizenship", "authorized", "authorised",
-    "eligible", "eligibility", "reside", "residing", "resident", "residents",
-    "based", "located", "work authorization", "work authorisation",
-    "work permit", "visa", "sponsor", "sponsorship",
-]
-
-
-def _region_restriction(text: str) -> str | None:
-    """Find a region token paired with a nearby work-authorization cue."""
-    low = (text or "").lower()
-    gap = r"[^.\n]{0,40}"
-    for region in ABROAD_TERMS:
-        r = re.escape(region)
-        for cue in _RESTRICTION_CUES:
-            c = re.escape(cue)
-            forward = rf"(?<![a-z0-9]){r}(?![a-z0-9]){gap}(?<![a-z0-9]){c}(?![a-z0-9])"
-            backward = rf"(?<![a-z0-9]){c}(?![a-z0-9]){gap}(?<![a-z0-9]){r}(?![a-z0-9])"
-            if re.search(forward, low) or re.search(backward, low):
-                return f"{region} ... {cue}"
-    return None
-
-
-def _work_auth_restriction(text: str) -> str | None:
-    """Return a work-authorization restriction stated in free text, if any."""
-    return _find(text, WORK_AUTH_PROSE_TERMS) or _region_restriction(text)
-
 
 def _find(text: str, terms: list[str]) -> str | None:
     """Return the first term present in text as a whole phrase (word-bounded)."""
@@ -180,8 +149,8 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
                 0.0, False, f"location/work-authorization restriction: {reject_prose!r}"
             )
     else:
-        prose = _find(desc[:600], cfg.location_reject_keywords) or _work_auth_restriction(
-            desc[:600]
+        prose = _find(desc[:600], cfg.location_reject_keywords) or _find(
+            desc[:600], WORK_AUTH_PROSE_TERMS
         )
         if prose:
             return LocationAssessment(
