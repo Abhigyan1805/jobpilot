@@ -282,6 +282,46 @@ class FilteringTests(unittest.TestCase):
         self.assertTrue(assessment.eligible)
         self.assertFalse(assessment.auto_apply_ok)
 
+    def test_us_citizenship_restriction_only_in_description_blocks_auto_apply(self):
+        for phrase in ("US citizenship required", "Must be a US citizen", "Green card required"):
+            p = posting(
+                title="Machine Learning Intern",
+                location="Remote",
+                is_remote=True,
+                description=(
+                    f"Machine learning internship January 2026 - June 2026. {phrase}."
+                ),
+            )
+            result = filter_posting(p, self.cfg.filter)
+            self.assertTrue(result.eligible, (phrase, result.reject_reasons))
+            assessment = assess_location(p, self.cfg.filter)
+            self.assertFalse(assessment.auto_apply_ok, phrase)
+
+    def test_onsite_only_india_internship_remains_eligible(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Bengaluru, India",
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "This is an onsite only internship in Bengaluru."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        self.assertTrue(assess_location(p, self.cfg.filter).auto_apply_ok)
+
+    def test_onsite_only_foreign_city_still_rejected(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="New York, NY",
+            is_remote=None,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "This is an onsite only internship in New York."
+            ),
+        )
+        self.assertFalse(assess_location(p, self.cfg.filter).eligible)
+
     def test_security_clearance_only_in_description_blocks_auto_apply(self):
         p = posting(
             title="Machine Learning Intern",

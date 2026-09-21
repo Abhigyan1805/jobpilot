@@ -105,7 +105,6 @@ class FilterConfig:
             "authorized to work in the us",
             "requires us citizenship",
             "security clearance",
-            "onsite only",
         ]
     )
     allow_unknown_window: bool = False
