@@ -118,8 +118,9 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
     india_local = _find(location, cfg.india_keywords)
     abroad_local = _find(location, ABROAD_TERMS)
     global_local = _find(location, GLOBAL_TERMS)
+    remote_local = _find(location, cfg.remote_keywords)
     location_names_country = bool(india_local or abroad_local)
-    remote = posting.is_remote is True or _find(location, cfg.remote_keywords) is not None
+    remote = posting.is_remote is True or remote_local is not None
 
     reject_local = _find(location, cfg.location_reject_keywords)
     if reject_local:
@@ -146,6 +147,20 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
         return LocationAssessment(1.0, True, "location is in India")
     if global_local:
         return LocationAssessment(0.95, True, "globally remote")
+
+    # The structured location names a place that is neither a recognised country
+    # nor an explicit remote/global form. It is not confirmably open to India, so
+    # a description-level India mention or a bare remote flag must not promote it
+    # to auto-apply; route it to the review queue instead.
+    if location.strip() and not location_names_country and not remote_local and not global_local:
+        if _find(combined, cfg.india_keywords) or posting.is_remote is True:
+            return LocationAssessment(
+                0.5,
+                True,
+                f"location {posting.location!r} is not confirmably open to India; review before applying",
+                auto_apply_ok=False,
+            )
+
     if not location_names_country and _find(combined, cfg.india_keywords):
         return LocationAssessment(0.9, True, "India mentioned in posting")
 

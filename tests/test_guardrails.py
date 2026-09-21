@@ -157,6 +157,23 @@ class GuardrailTests(unittest.TestCase):
         queued = [r["stable_id"] for r in self.store.list_review("pending")]
         self.assertIn(p.stable_id, queued)
 
+    def test_city_only_foreign_location_with_india_mention_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-loc-city-1",
+            location="New York, NY",
+            is_remote=None,
+            description=IN_WINDOW + " Our global hubs include Bengaluru, India.",
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
     def test_fulltime_role_mentioning_interns_never_auto_submitted(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)

@@ -89,6 +89,44 @@ class FilteringTests(unittest.TestCase):
         assessment = assess_location(p, self.cfg.filter)
         self.assertFalse(assessment.eligible)
 
+    def test_india_mention_does_not_confirm_city_only_foreign_location(self):
+        for location in ("New York, NY", "London", "Toronto"):
+            p = posting(
+                title="Machine Learning Intern",
+                location=location,
+                is_remote=None,
+                description=(
+                    "Our global hubs include Bengaluru, India. Machine learning "
+                    "internship January 2026 - June 2026. Python, RAG, LLMs."
+                ),
+            )
+            assessment = assess_location(p, self.cfg.filter)
+            self.assertTrue(assessment.eligible, location)
+            self.assertFalse(assessment.auto_apply_ok, location)
+
+    def test_city_only_foreign_location_without_india_signal_is_rejected(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="New York, NY",
+            is_remote=None,
+            description="Machine learning internship January 2026 - June 2026.",
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertFalse(assessment.eligible)
+
+    def test_remote_flag_does_not_confirm_city_only_foreign_location(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="New York, NY",
+            is_remote=True,
+            description=(
+                "Our global hubs include Bengaluru, India. Machine learning "
+                "internship January 2026 - June 2026. Python, RAG, LLMs."
+            ),
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertFalse(assessment.auto_apply_ok)
+
     def test_india_mention_without_structured_country_is_eligible(self):
         p = posting(
             title="Machine Learning Intern",
