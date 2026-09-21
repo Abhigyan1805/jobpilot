@@ -11,22 +11,6 @@ from jobpilot.store import Store
 from tests.helpers import mini_profile, posting, strong_match, test_config
 
 
-class _FakeHttpResponse:
-    status = 200
-
-    def __init__(self, body: bytes = b"<html>ok</html>"):
-        self._body = body
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
 class LinkOutSubmissionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -75,8 +59,9 @@ class LinkOutSubmissionTests(unittest.TestCase):
             "https://boards.greenhouse.io/acme/jobs/123",
         )
 
-    def test_html_apply_page_is_never_posted_or_recorded_submitted(self):
+    def test_html_apply_page_is_routed_to_review_and_never_recorded_submitted(self):
         adapter = build_adapter(self.cfg, self.answers)
+        adapter.submit = mock.Mock(wraps=adapter.submit)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
         p = posting(
             source="lever",
@@ -84,12 +69,11 @@ class LinkOutSubmissionTests(unittest.TestCase):
             description="Machine learning internship, January 2026 - June 2026. Python, RAG.",
             apply_url="https://jobs.lever.co/spotify/abc/apply",
         )
-        with mock.patch("urllib.request.urlopen", autospec=True) as urlopen:
-            urlopen.return_value = _FakeHttpResponse()
-            outcome = applier.process(self._plan(p))
+        outcome = applier.process(self._plan(p))
         self.assertEqual(outcome.action, "review")
-        urlopen.assert_not_called()
+        adapter.submit.assert_not_called()
         self.assertFalse(self.store.has_submitted(p.stable_id))
+        self.assertIn(p.stable_id, [r["stable_id"] for r in self.store.list_review("pending")])
         statuses = [
             row["status"]
             for row in self.store.iter_rows(
