@@ -43,6 +43,7 @@ class AnswerBook:
         if not self.profile:
             return None
         c = self.profile.contact
+        name_parts = self.profile.name.split() if self.profile.name else []
         mapping = {
             "email": c.get("email"),
             "e-mail": c.get("email"),
@@ -50,8 +51,11 @@ class AnswerBook:
             "phone_number": c.get("phone"),
             "full_name": self.profile.name,
             "name": self.profile.name,
+            "first_name": name_parts[0] if name_parts else None,
+            "last_name": " ".join(name_parts[1:]) if len(name_parts) > 1 else None,
             "linkedin": c.get("linkedin"),
             "github": c.get("github"),
+            "org": c.get("org"),
         }
         return mapping.get(key)
 

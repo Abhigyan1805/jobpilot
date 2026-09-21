@@ -27,5 +27,5 @@ path = "demo_postings.json"
 enabled = false
 
 [apply]
-adapter = "none"
+adapter = "auto"
 daily_cap = 5

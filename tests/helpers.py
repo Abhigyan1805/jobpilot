@@ -63,6 +63,8 @@ def posting(
     description: str = "",
     employment_type: str = "Internship",
     is_remote: bool | None = None,
+    apply_url: str | None = None,
+    apply_email: str = "",
 ) -> JobPosting:
     return JobPosting(
         source=source,
@@ -70,7 +72,8 @@ def posting(
         company=company,
         title=title,
         url=f"https://example.com/{source}/{job_id}",
-        apply_url=f"https://example.com/{source}/{job_id}/apply",
+        apply_url=apply_url if apply_url is not None else f"https://example.com/{source}/{job_id}/apply",
+        apply_email=apply_email,
         location=location,
         description=description or "Machine learning internship. Python, RAG, LLMs, evaluation.",
         employment_type=employment_type,

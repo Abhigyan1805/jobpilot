@@ -42,6 +42,7 @@ class LocalFileAdapter(SourceAdapter):
                     title=job.get("title", ""),
                     url=job.get("url", ""),
                     apply_url=job.get("apply_url", job.get("url", "")),
+                    apply_email=job.get("apply_email", ""),
                     location=job.get("location", ""),
                     description=desc,
                     employment_type=job.get("employment_type", ""),

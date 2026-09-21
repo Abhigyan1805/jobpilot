@@ -18,6 +18,8 @@ from jobpilot.answers import AnswerBook
 from jobpilot.config import Config
 from jobpilot.models import ApplicationPlan, JobPosting, SubmissionResult
 
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\Z")
+
 
 class SubmissionAdapter(ABC):
     name: str = "none"
@@ -58,18 +60,20 @@ class NoPublicPathAdapter(SubmissionAdapter):
 class EmailAdapter(SubmissionAdapter):
     """Submit by emailing the posting's application address.
 
-    Disabled unless the config supplies SMTP settings; the recipient address is
-    read from the posting, never guessed. This is a genuine, stable path used by
-    some postings that publish an application email.
+    Disabled unless the config supplies SMTP settings. The recipient must be an
+    explicit, structured ``apply_email`` supplied by the source (optionally
+    narrowed by ``apply.submission.email_allowlist``); an address is never
+    scraped from free-text posting body, so a stray support/privacy address in a
+    JD can never receive the resume.
     """
 
     name = "email"
     required_fields = ["email"]
 
     def can_submit(self, plan: ApplicationPlan) -> tuple[bool, str]:
-        recipient = self._recipient(plan.posting)
+        recipient, reason = self._recipient(plan.posting)
         if not recipient:
-            return False, "no application email found in the posting"
+            return False, reason
         smtp = self.config.apply.submission.get("smtp", {})
         if not smtp.get("host"):
             return False, "email submission not configured (apply.submission.smtp.host)"
@@ -78,7 +82,9 @@ class EmailAdapter(SubmissionAdapter):
         return super().can_submit(plan)
 
     def submit(self, plan: ApplicationPlan) -> SubmissionResult:
-        recipient = self._recipient(plan.posting)
+        recipient, reason = self._recipient(plan.posting)
+        if not recipient:
+            return SubmissionResult(status="failed", detail=reason, adapter=self.name)
         smtp_cfg = self.config.apply.submission.get("smtp", {})
         sender = smtp_cfg.get("from") or self.answers.resolve("email")
         company = plan.posting.company or "your team"
@@ -112,16 +118,26 @@ class EmailAdapter(SubmissionAdapter):
             evidence={"recipient": recipient, "subject": msg["Subject"]},
         )
 
-    @staticmethod
-    def _recipient(posting: JobPosting) -> str:
-        raw_desc = posting.raw.get("description", "") if isinstance(posting.raw, dict) else ""
-        text = f"{posting.description}\n{raw_desc}"
-        m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text or "")
-        return m.group(0) if m else ""
+    def _recipient(self, posting: JobPosting) -> tuple[str, str]:
+        address = (posting.apply_email or "").strip()
+        if not address or not EMAIL_RE.fullmatch(address):
+            return "", "no authorized application email for this posting"
+        allowlist = [
+            str(entry).strip().lower()
+            for entry in (self.config.apply.submission.get("email_allowlist") or [])
+            if str(entry).strip()
+        ]
+        if allowlist and address.lower() not in allowlist:
+            return "", f"application email {address!r} is not in apply.submission.email_allowlist"
+        return address, ""
 
 
 def build_adapter(config: Config, answers: AnswerBook) -> SubmissionAdapter:
-    kind = (config.apply.adapter or "none").lower()
+    kind = (config.apply.adapter or "auto").lower()
     if kind == "email":
         return EmailAdapter(config, answers)
-    return NoPublicPathAdapter(config, answers)
+    if kind == "none":
+        return NoPublicPathAdapter(config, answers)
+    from jobpilot.applying.ats import AtsAdapter
+
+    return AtsAdapter(config, answers)

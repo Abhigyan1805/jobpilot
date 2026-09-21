@@ -2,20 +2,15 @@
 
 These are *suggestions for a human reviewer*, never facts, and they never alter
 generated content. They are stored with the application record so the Captain
-can see what looked risky at a glance. A deterministic advisor is used because
-it needs no model or network; an optional callable hook lets an LLM contribute
-suggestions without ever being able to change a fact.
+can see what looked risky at a glance. The advisor is deterministic: it needs no
+model and no network, so it can never change a fact.
 """
 
 from __future__ import annotations
 
-from typing import Callable
-
 from jobpilot.config import Config
 from jobpilot.filtering import assess_location, is_internship
 from jobpilot.models import JobPosting, MatchResult
-
-Advisor = Callable[[JobPosting, MatchResult, Config], list[str]]
 
 
 def suggest_red_flags(posting: JobPosting, match: MatchResult, config: Config) -> list[str]:
@@ -37,19 +32,3 @@ def suggest_red_flags(posting: JobPosting, match: MatchResult, config: Config) -
     if "unpaid" in posting.description.lower():
         flags.append("posting may be unpaid; confirm")
     return flags
-
-
-def apply_advisor_hook(
-    advisor: Advisor | None,
-    posting: JobPosting,
-    match: MatchResult,
-    config: Config,
-) -> list[str]:
-    if advisor is None:
-        return []
-    try:
-        suggestions = advisor(posting, match, config) or []
-    except Exception:  # noqa: BLE001 - advisory only
-        return []
-    # Suggestions must be strings and are explicitly labelled as non-factual.
-    return [f"[advisor suggestion] {s}" for s in suggestions if isinstance(s, str)]

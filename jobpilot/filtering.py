@@ -57,11 +57,11 @@ def seniority_check(posting: JobPosting, cfg) -> CheckResult:
 
 def fulltime_check(posting: JobPosting, cfg) -> CheckResult:
     haystack = f"{posting.title} {posting.employment_type}"
-    if _find(haystack, cfg.internship_keywords):
-        return CheckResult("fulltime", True, "internship keyword present", 1.0)
     hit = _find(haystack, cfg.fulltime_reject_keywords)
     if hit:
         return CheckResult("fulltime", False, f"full-time signal {hit!r}", 0.0)
+    if _find(haystack, cfg.internship_keywords):
+        return CheckResult("fulltime", True, "internship keyword present", 1.0)
     return CheckResult("fulltime", True, "no full-time signal", 0.5)
 
 
@@ -83,7 +83,7 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
 
     if _find(location, cfg.india_keywords):
         return LocationAssessment(1.0, True, "location is in India")
-    if _find(combined, GLOBAL_TERMS):
+    if _find(location, GLOBAL_TERMS):
         return LocationAssessment(0.95, True, "globally remote")
     if _find(combined, cfg.india_keywords):
         return LocationAssessment(0.9, True, "India mentioned in posting")

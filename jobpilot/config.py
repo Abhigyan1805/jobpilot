@@ -43,13 +43,9 @@ class FilterConfig:
         default_factory=lambda: [
             "intern",
             "internship",
-            "trainee",
             "co-op",
             "coop",
-            "placement",
             "summer analyst",
-            "apprentice",
-            "graduate program",
         ]
     )
     fulltime_reject_keywords: list[str] = field(
@@ -112,12 +108,11 @@ class FilterConfig:
             "onsite only",
         ]
     )
-    allow_unknown_window: bool = True
+    allow_unknown_window: bool = False
     allow_onsite_abroad: bool = False
     allow_unknown_location: bool = False
     window_start_month: int = 1
     window_end_month: int = 6
-    window_months: list[str] = field(default_factory=lambda: ["january", "february", "march", "april", "may", "june"])
 
 
 @dataclass
@@ -184,10 +179,9 @@ class MatchConfig:
 class ApplyConfig:
     enabled: bool = True
     auto_apply_strong: bool = True
-    adapter: str = "none"
+    adapter: str = "auto"
     daily_cap: int = 5
     answers_file: str = "answers.toml"
-    max_attempts_per_posting: int = 1
     submission: dict[str, Any] = field(default_factory=dict)
 
 

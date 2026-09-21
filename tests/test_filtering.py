@@ -20,8 +20,66 @@ class FilteringTests(unittest.TestCase):
         self.assertTrue(result.window_label)
 
     def test_remote_intern_passes(self):
-        p = posting(title="Data Science Intern", location="Remote - Worldwide", is_remote=True)
+        p = posting(
+            title="Data Science Intern",
+            location="Remote - Worldwide",
+            is_remote=True,
+            description="Data science internship running January 2026 - June 2026.",
+        )
         self.assertTrue(filter_posting(p, self.cfg.filter).eligible)
+
+    def test_unknown_window_rejected_by_default(self):
+        p = posting(title="Data Science Intern", location="Remote - Worldwide", is_remote=True)
+        result = filter_posting(p, self.cfg.filter)
+        self.assertFalse(result.eligible)
+        self.assertTrue(any("window" in r for r in result.reject_reasons))
+
+    def test_unknown_window_allowed_when_configured(self):
+        cfg = test_config(filt={"allow_unknown_window": True})
+        p = posting(title="Data Science Intern", location="Remote - Worldwide", is_remote=True)
+        self.assertTrue(filter_posting(p, cfg.filter).eligible)
+
+    def test_fulltime_graduate_program_rejected(self):
+        p = posting(
+            title="Graduate Program - Software Engineer",
+            employment_type="FullTime",
+            location="Bengaluru, India",
+            description="A full-time graduate program for software engineers, January to June 2026.",
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertFalse(result.eligible)
+        self.assertTrue(any("fulltime" in r or "internship" in r for r in result.reject_reasons))
+
+    def test_global_word_in_description_does_not_admit_onsite_us(self):
+        p = posting(
+            title="Software Engineering Intern",
+            location="San Francisco, United States",
+            description="Join our global team building products. January - June 2026 internship.",
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertFalse(result.eligible)
+        self.assertTrue(any("india" in r for r in result.reject_reasons))
+
+    def test_technology_name_does_not_corrupt_window(self):
+        p = posting(
+            title="Software Engineering Intern",
+            location="Remote - Worldwide",
+            is_remote=True,
+            description="Tech stack: Java, Spring Boot. Our fall internship is a 6-month placement.",
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertFalse(result.eligible)
+        self.assertTrue(any("window" in r for r in result.reject_reasons))
+
+    def test_season_near_internship_still_detected(self):
+        cfg = self.cfg.filter
+        self.assertEqual(classify_window("Our fall internship runs late in the year.", cfg).overlaps, False)
+        self.assertTrue(classify_window("A summer internship for 2026.", cfg).overlaps)
+        self.assertIsNone(classify_window("Experience with Spring Boot required.", cfg).overlaps)
+        self.assertEqual(
+            classify_window("An internship using Spring Boot and running in the fall term.", cfg).overlaps,
+            False,
+        )
 
     def test_fulltime_role_rejected(self):
         p = posting(

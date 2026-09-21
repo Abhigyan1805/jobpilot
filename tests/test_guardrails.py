@@ -69,6 +69,35 @@ class GuardrailTests(unittest.TestCase):
         self.assertEqual(outcome.status, "dry_run")
         self.assertEqual(adapter.calls, [])
 
+    def test_requires_review_plan_is_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        plan = plan_for(posting(job_id="req-2"))
+        plan.requires_review = True
+        plan.review_reason = "parseability check failed: missing section"
+        outcome = applier.process(plan)
+        self.assertEqual(outcome.status, "requires_review")
+        self.assertEqual(adapter.calls, [])
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(plan.posting.stable_id, queued)
+
+    def test_auto_apply_strong_disabled_routes_to_review(self):
+        cfg = test_config(Path(self.tmp.name), apply={"auto_apply_strong": False})
+        adapter = FakeAdapter(cfg)
+        applier = Applier(self.store, cfg, adapter, cfg.output.dir)
+        outcome = applier.process(plan_for(posting(job_id="no-auto-1")))
+        self.assertEqual(outcome.action, "review")
+        self.assertIn("auto_apply_strong", outcome.reason)
+        self.assertEqual(adapter.calls, [])
+
+    def test_apply_disabled_routes_to_review(self):
+        cfg = test_config(Path(self.tmp.name), apply={"enabled": False})
+        adapter = FakeAdapter(cfg)
+        applier = Applier(self.store, cfg, adapter, cfg.output.dir)
+        outcome = applier.process(plan_for(posting(job_id="disabled-1")))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(adapter.calls, [])
+
     @staticmethod
     def _weak():
         from tests.helpers import strong_match

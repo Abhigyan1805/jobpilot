@@ -329,10 +329,6 @@ class Store:
         )
         return int(cur.fetchone()["n"])
 
-    def attempts_for(self, stable_id: str) -> int:
-        cur = self.conn.execute("SELECT COUNT(*) AS n FROM attempts WHERE stable_id = ?", (stable_id,))
-        return int(cur.fetchone()["n"])
-
     # -------------------------------------------------------------- review queue
     def enqueue_review(self, plan: ApplicationPlan, *, packet_dir: str = "") -> None:
         now = utcnow()

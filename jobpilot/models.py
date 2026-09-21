@@ -20,6 +20,7 @@ class JobPosting:
     employment_type: str = ""
     published_at: str = ""
     apply_url: str = ""
+    apply_email: str = ""
     is_remote: bool | None = None
     salary: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -129,5 +130,5 @@ class ApplicationPlan:
     gaps: list[str] = field(default_factory=list)
     missing_keywords: list[str] = field(default_factory=list)
     red_flags: list[str] = field(default_factory=list)
-    requires_review: bool = True
+    requires_review: bool = False
     review_reason: str = ""

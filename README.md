@@ -28,8 +28,9 @@ employer, date, metric or project.
    content in the exact existing LaTeX style, then compiles it to PDF. Also produces
    a short cover letter per application.
 4. **Applying** - auto-applies only to strong matches, behind mandatory guardrails
-   (dedupe, never-missing-required-field, daily cap, durable record). Anything with
-   no stable public submission path goes to the review queue.
+   (dedupe, never-missing-required-field, daily cap, durable record). Strong matches
+   on Greenhouse and Lever go through their public application endpoints; any board
+   with no stable public submission path goes to the review queue.
 5. **Tracker and review queue** - a durable SQLite store of every posting seen and a
    queue of uncertain / no-public-path applications with a direct link and the
    generated PDFs, plus a CLI to list, approve and export.
@@ -128,8 +129,10 @@ Each queued item has a packet directory with `resume.pdf`, `cover_letter.pdf`,
   from the profile or `answers.toml`, the application is not submitted.
 - **Configurable daily cap.** Once reached, further strong matches are queued instead.
 - **Durable record** of every attempt and its outcome in SQLite.
-- **No improvised form filling.** Where a board has no stable public submission path,
-  the application goes to the review queue.
+- **No improvised form filling.** Submission happens only through the recognised
+  Greenhouse/Lever public application endpoints or the configured email channel.
+  Where a board has no stable public submission path, the application goes to the
+  review queue.
 - **Never invent content.** The no-invention validator fails generation if any number
   or word carrying a fact is not present in the master profile.
 
@@ -180,8 +183,8 @@ Additional checks from the recruiter-prompt workflow:
   application is forced to review.
 - **Red-flag critique**: a deterministic advisor proposes operator-facing
   suggestions. They are suggestions, never facts, and never alter content. They are
-  stored with the application record. An optional callable hook lets an LLM add
-  suggestions without any ability to change a fact.
+  stored with the application record. (An optional LLM-advisor hook is a documented
+  follow-up, not part of v1.)
 
 ### A note on "ATS rejects most resumes"
 
@@ -229,11 +232,16 @@ toolchain is unavailable).
 
 - The public ATS endpoints are undocumented and may change; adapters are per-source
   and isolated for that reason.
-- Submitting a real application is inherently board-specific. Out of the box
-  `adapter = "none"` routes everything to the review queue. The only auto-submit path
-  implemented is email (to an application address found in the posting, with SMTP
-  configured); there is deliberately no generic web-form filler.
+- Submitting a real application is inherently board-specific. The default
+  `adapter = "auto"` submits strong matches through the public Greenhouse and Lever
+  application endpoints - the same per-posting hosted form a browser uses - with the
+  profile and answers mapped onto each board's required fields. `adapter = "email"`
+  is an alternate channel to a structured application address (optionally narrowed
+  by `apply.submission.email_allowlist`); free-text addresses in a job description
+  are never used. Any other board, or any application missing a required answer, is
+  routed to the review queue - there is deliberately no generic web-form filler.
 - The window check is a best-effort inference from posting text; postings rarely
-  state exact dates, so unknown-window internships are configurable.
+  state exact dates, so unknown-window internships are rejected by default and can
+  be allowed explicitly with `filter.allow_unknown_window = true`.
 - Discovery only sees boards whose tokens you configure - there is no global job
   search, and there is no public directory mapping companies to board tokens.

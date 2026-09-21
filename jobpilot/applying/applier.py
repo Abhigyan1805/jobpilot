@@ -48,6 +48,13 @@ class Applier:
             self._add_reason(plan, "LinkedIn: discovered and tailored, but never auto-submitted (captain applies)")
             return self._to_review(plan, "linkedin_review")
 
+        # Guard 1b: a plan flagged during generation (compile failure,
+        # no-invention, unparseable PDF) is never auto-submitted.
+        if plan.requires_review:
+            if not plan.review_reason:
+                plan.review_reason = "flagged for review by generation checks"
+            return self._to_review(plan, "requires_review")
+
         # Guard 2: only strong matches auto-apply.
         if plan.match.band != "strong":
             self._add_reason(
@@ -59,6 +66,10 @@ class Applier:
 
         if not self.config.apply.enabled:
             self._add_reason(plan, "auto-apply disabled by config")
+            return self._to_review(plan, "review")
+
+        if not self.config.apply.auto_apply_strong:
+            self._add_reason(plan, "auto-apply of strong matches disabled by config (apply.auto_apply_strong)")
             return self._to_review(plan, "review")
 
         # Guard 3 (dedupe): never touch a posting already recorded.

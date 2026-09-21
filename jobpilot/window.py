@@ -51,6 +51,33 @@ SEASON_MONTHS = {
 NUMERIC_RANGE_RE = re.compile(
     r"\b(?P<m1>0?[1-9]|1[0-2])\s*/\s*(?P<y1>\d{4})?\s*(?:-|–|—|to)\s*(?P<m2>0?[1-9]|1[0-2])\s*/\s*(?P<y2>\d{4})\b"
 )
+YEAR_TOKEN_RE = re.compile(r"^(?:19|20)\d{2}$")
+# Season words only count when they sit next to internship/term context (or a
+# year) so that product/technology names such as "Spring Boot" cannot corrupt
+# the window judgement.
+SEASON_CONTEXT = {
+    "intern", "interns", "internship", "internships", "coop", "co-op",
+    "cooperative", "trainee", "term", "analyst", "placement", "program",
+    "programme", "session", "semester",
+}
+# "Spring" is also a technology name; when it heads one of these products it is
+# not a timing signal.
+SPRING_TECH_SUFFIXES = {
+    "boot", "cloud", "framework", "security", "mvc", "batch", "webflux",
+    "jpa", "graphql", "actuator", "data",
+}
+
+
+def _season_has_context(text: str, match: re.Match, season: str) -> bool:
+    before = re.findall(r"[A-Za-z0-9-]+", text[: match.start()])[-2:]
+    after = re.findall(r"[A-Za-z0-9-]+", text[match.end():])[:2]
+    if season == "spring" and after and after[0].lower() in SPRING_TECH_SUFFIXES:
+        return False
+    for token in (*before, *after):
+        lowered = token.lower()
+        if lowered in SEASON_CONTEXT or YEAR_TOKEN_RE.match(lowered):
+            return True
+    return False
 
 
 @dataclass
@@ -104,9 +131,12 @@ def classify_window(text: str, cfg) -> WindowInfo:
         label = _label(min(m1, m2), max(m1, m2), m.group("y1") or m.group("y2") or "")
         return WindowInfo(label, 1.0, bool(months & window), f"explicit range {label}")
 
-    # 3. Season words.
+    # 3. Season words, but only when a nearby internship/term word or year
+    #    confirms the season is really the posting's timing and not a tech name.
     for m in SEASON_RE.finditer(text):
         season = m.group("season").lower()
+        if not _season_has_context(text, m, season):
+            continue
         months = SEASON_MONTHS[season]
         year = ""
         tail = text[m.end(): m.end() + 12]
