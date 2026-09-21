@@ -297,6 +297,22 @@ class FilteringTests(unittest.TestCase):
             assessment = assess_location(p, self.cfg.filter)
             self.assertFalse(assessment.auto_apply_ok, phrase)
 
+    def test_remote_internship_mentioning_continent_in_prose_can_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Our customers are based across Europe. Python, RAG."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertTrue(assessment.auto_apply_ok, assessment.detail)
+        self.assertEqual(review_only_reasons(p, self.cfg.filter), [])
+
     def test_about_us_prose_does_not_restrict_india_remote_internship(self):
         p = posting(
             title="Machine Learning Intern",
@@ -409,6 +425,34 @@ class FilteringTests(unittest.TestCase):
         )
         result = filter_posting(p, self.cfg.filter)
         self.assertTrue(result.eligible, result.reject_reasons)
+
+    def test_intern_title_tagged_fulltime_is_visible_and_reviewed(self):
+        p = posting(
+            title="Machine Learning Intern",
+            employment_type="FullTime",
+            location="Bengaluru, India",
+            description="Machine learning internship January 2026 - June 2026. Python, RAG.",
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        fulltime = next(c for c in result.checks if c.name == "fulltime")
+        self.assertTrue(fulltime.passed)
+        self.assertTrue(fulltime.review_only)
+        blockers = review_only_reasons(p, self.cfg.filter)
+        self.assertTrue(any("ambiguous" in b for b in blockers), blockers)
+
+    def test_clearly_fulltime_title_tagged_fulltime_is_rejected(self):
+        p = posting(
+            title="Graduate Program - Software Engineer",
+            employment_type="FullTime",
+            location="Bengaluru, India",
+            description="A full-time graduate program for software engineers, January to June 2026.",
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertFalse(result.eligible)
+        fulltime = next(c for c in result.checks if c.name == "fulltime")
+        self.assertFalse(fulltime.passed)
+        self.assertFalse(fulltime.review_only)
 
     def test_out_of_window_rejected(self):
         p = posting(

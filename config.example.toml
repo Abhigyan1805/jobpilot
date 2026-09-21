@@ -107,7 +107,8 @@ answers_file = "answers.toml"
 # username = "you@example.com"
 # password = "app-password-here"
 #
-# Only used by adapter = "email". A structured apply-email from the source is
-# required; this allowlist (optional) further narrows which recipients may be
-# used. Free-text addresses in a job description are never used.
+# Used by adapter = "auto" (default) and adapter = "email". A structured
+# apply-email from the source is required; this allowlist (optional) further
+# narrows which recipients may be used. Free-text addresses in a job
+# description are never used.
 # email_allowlist = ["careers@example.com"]

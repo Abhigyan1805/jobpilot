@@ -25,12 +25,16 @@ ABROAD_TERMS = [
 GLOBAL_TERMS = ["worldwide", "anywhere", "global", "any location", "fully remote"]
 
 # Signals that a posting restricts where (or for whom) the role is open, used
-# when the structured location field names no country. The bare token "us" is
-# excluded from the country list because it appears constantly in English prose
-# ("join us", "about us"); the explicit phrases below catch the real
-# restrictions without that false positive.
+# when the structured location field names no country. Only unambiguous country
+# names are used: broad continents/regions are too imprecise to read as a
+# restriction from prose (a global team mentioning Europe is not a Europe-only
+# role), and they stay in ABROAD_TERMS, which parses the structured location.
+# The bare token "us" is excluded from the country list because it appears
+# constantly in English prose ("join us", "about us"); the explicit phrases
+# below catch the real restrictions without that false positive.
+_WORK_AUTH_BROAD_REGIONS = {"emea", "apac", "latam", "europe"}
 WORK_AUTH_PROSE_TERMS = [
-    *(t for t in ABROAD_TERMS if t not in {"us", "u.s.", "u.s"}),
+    *(t for t in ABROAD_TERMS if t not in {"us", "u.s.", "u.s", *_WORK_AUTH_BROAD_REGIONS}),
     "in the us", "in the u.s.", "in the usa",
     "within the us", "within the u.s.",
     "us only", "u.s. only", "usa only",
@@ -93,10 +97,23 @@ def seniority_check(posting: JobPosting, cfg) -> CheckResult:
 
 
 def fulltime_check(posting: JobPosting, cfg) -> CheckResult:
-    structured = f"{posting.title} {posting.employment_type}"
+    title = posting.title or ""
+    structured = f"{title} {posting.employment_type}"
     description = posting.description[:1500]
     hit = _find(structured, cfg.fulltime_reject_keywords)
     if hit:
+        # ATS boards routinely tag genuine internships with a generic
+        # "FullTime" employment type. When the title itself identifies an
+        # internship, that clash is ambiguous, not a hard full-time rejection:
+        # keep the posting visible and route it to a human instead.
+        if _find(title, cfg.internship_keywords) and not _find(title, cfg.fulltime_reject_keywords):
+            return CheckResult(
+                "fulltime",
+                True,
+                f"ambiguous: internship title with full-time signal {hit!r}; review before applying",
+                0.3,
+                review_only=True,
+            )
         return CheckResult("fulltime", False, f"full-time signal {hit!r}", 0.0)
     desc_hit = _find(description, cfg.fulltime_reject_keywords)
     internship_hit = _find(f"{structured} {description}", cfg.internship_keywords)

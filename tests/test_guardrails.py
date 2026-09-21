@@ -215,6 +215,24 @@ class GuardrailTests(unittest.TestCase):
         queued = [r["stable_id"] for r in self.store.list_review("pending")]
         self.assertIn(p.stable_id, queued)
 
+    def test_intern_title_tagged_fulltime_routed_to_review(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-ft-tag-1",
+            title="Machine Learning Intern",
+            employment_type="FullTime",
+            location="Bengaluru, India",
+            description=IN_WINDOW,
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
     def test_auto_apply_strong_disabled_routes_to_review(self):
         cfg = test_config(Path(self.tmp.name), apply={"auto_apply_strong": False})
         adapter = FakeAdapter(cfg)
