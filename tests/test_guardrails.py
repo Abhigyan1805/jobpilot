@@ -106,6 +106,64 @@ class GuardrailTests(unittest.TestCase):
         self.assertEqual(outcome.status, "submitted")
         self.assertEqual(adapter.calls, [plan.posting.stable_id])
 
+    def test_remote_us_only_in_description_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-loc-1",
+            location="Remote",
+            is_remote=True,
+            description=IN_WINDOW + " Candidates must be located in the United States.",
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
+    def test_fulltime_role_mentioning_interns_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-ft-1",
+            title="Software Engineer",
+            employment_type="",
+            location="Remote - Worldwide",
+            is_remote=True,
+            description=(
+                "This is a full-time role. You will mentor interns and run our "
+                "internship program. " + IN_WINDOW
+            ),
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
+    def test_genuine_internship_fulltime_conversion_routed_to_review(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-ft-conv-1",
+            title="Machine Learning Intern",
+            location="Bengaluru, India",
+            description=(
+                IN_WINDOW + " Strong performers may receive an opportunity for "
+                "full-time conversion."
+            ),
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
     def test_auto_apply_strong_disabled_routes_to_review(self):
         cfg = test_config(Path(self.tmp.name), apply={"auto_apply_strong": False})
         adapter = FakeAdapter(cfg)

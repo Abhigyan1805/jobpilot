@@ -1,6 +1,6 @@
 import unittest
 
-from jobpilot.filtering import filter_posting
+from jobpilot.filtering import assess_location, filter_posting
 from jobpilot.window import classify_window
 from tests.helpers import posting, test_config
 
@@ -121,6 +121,63 @@ class FilteringTests(unittest.TestCase):
         result = filter_posting(p, self.cfg.filter)
         self.assertFalse(result.eligible)
         self.assertTrue(any("india" in r for r in result.reject_reasons))
+
+    def test_us_restriction_only_in_description_is_not_discarded(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Candidates must be located in the United States."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+
+    def test_us_restriction_only_in_description_blocks_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Candidates must be located in the United States."
+            ),
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertTrue(assessment.eligible)
+        self.assertFalse(assessment.auto_apply_ok)
+
+    def test_fulltime_signal_in_description_is_not_rejected_but_flagged(self):
+        p = posting(
+            title="Software Engineer",
+            employment_type="",
+            location="Remote - Worldwide",
+            is_remote=True,
+            description=(
+                "This is a full-time role. You will mentor interns and run our "
+                "internship program. January 2026 - June 2026."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        fulltime = next(c for c in result.checks if c.name == "fulltime")
+        self.assertTrue(fulltime.passed)
+        self.assertTrue(fulltime.review_only)
+
+    def test_genuine_internship_fulltime_conversion_not_rejected(self):
+        p = posting(
+            title="Machine Learning Intern",
+            employment_type="Internship",
+            location="Bengaluru, India",
+            description=(
+                "Machine learning internship January 2026 - June 2026 with an "
+                "opportunity for full-time conversion for strong performers."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
 
     def test_out_of_window_rejected(self):
         p = posting(

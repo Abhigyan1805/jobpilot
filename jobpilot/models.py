@@ -41,6 +41,7 @@ class CheckResult:
     passed: bool
     detail: str = ""
     score: float = 0.0
+    review_only: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "passed": self.passed, "detail": self.detail, "score": self.score}

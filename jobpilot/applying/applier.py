@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from jobpilot.applying.base import SubmissionAdapter
 from jobpilot.config import Config
+from jobpilot.filtering import review_only_reasons
 from jobpilot.models import ApplicationPlan
 from jobpilot.review import queue_plan
 from jobpilot.store import Store
@@ -78,6 +79,15 @@ class Applier:
                 f"{self.config.match.strong_threshold:.2f}",
             )
             return self._to_review(plan, "shortlist_review", "match")
+
+        # Guard 2b: an ambiguous classification (a work-authorization restriction
+        # or a full-time cue stated only in the description) is never
+        # auto-applied. The posting is still scored and queued for review.
+        blockers = review_only_reasons(posting, self.config.filter)
+        if blockers:
+            for blocker in blockers:
+                self._add_reason(plan, blocker)
+            return self._to_review(plan, "filter_review", "filter")
 
         if not self.config.apply.enabled:
             self._add_reason(plan, "auto-apply disabled by config")
