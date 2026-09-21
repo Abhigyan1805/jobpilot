@@ -61,6 +61,48 @@ class FilteringTests(unittest.TestCase):
         self.assertFalse(result.eligible)
         self.assertTrue(any("india" in r for r in result.reject_reasons))
 
+    def test_india_mention_does_not_admit_abroad_structured_location(self):
+        p = posting(
+            title="Software Engineering Intern",
+            location="San Francisco, United States",
+            is_remote=None,
+            description=(
+                "Our global hubs include Bengaluru, India. Machine learning internship "
+                "January 2026 - June 2026. Python, RAG, LLMs, evaluation."
+            ),
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertFalse(assessment.eligible)
+        result = filter_posting(p, self.cfg.filter)
+        self.assertFalse(result.eligible)
+
+    def test_india_mention_does_not_admit_us_restricted_remote(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote, US",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Our global hubs include Bengaluru, India."
+            ),
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertFalse(assessment.eligible)
+
+    def test_india_mention_without_structured_country_is_eligible(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Open to candidates based in India."
+            ),
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertTrue(assessment.eligible)
+        self.assertTrue(assessment.auto_apply_ok)
+
     def test_technology_name_does_not_corrupt_window(self):
         p = posting(
             title="Software Engineering Intern",

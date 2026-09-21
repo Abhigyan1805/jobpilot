@@ -146,7 +146,7 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
         return LocationAssessment(1.0, True, "location is in India")
     if global_local:
         return LocationAssessment(0.95, True, "globally remote")
-    if _find(combined, cfg.india_keywords):
+    if not location_names_country and _find(combined, cfg.india_keywords):
         return LocationAssessment(0.9, True, "India mentioned in posting")
 
     if remote and not abroad_local:
