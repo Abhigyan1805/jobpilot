@@ -85,14 +85,16 @@ seniority_fit = 0.05
 enabled = true
 auto_apply_strong = true
 # Channels that submit automatically: email to an explicit, source-supplied
-# application address (requires the SMTP block below). Greenhouse, Lever, Ashby
-# and Workable have no documented, verifiable public application endpoint, so
-# they are never submitted programmatically: each is prepared as a link-out
-# packet (resume, cover letter, direct apply link) and queued for one-click
-# human submission. "auto" (default) uses email wherever an authorized address
-# exists and queues everything else; "email" forces the email channel; "none"
-# routes everything to review. An unknown value is rejected, never treated as a
-# live submission path.
+# application address (requires the SMTP block below). Without that SMTP block
+# NOTHING is auto-submitted: every strong match is prepared as a link-out packet
+# and queued instead. Greenhouse, Lever, Ashby and Workable have no documented,
+# verifiable public application endpoint, so they are never submitted
+# programmatically: each is prepared as a link-out packet (resume, cover letter,
+# direct apply link, matched and gap JD keywords) and queued for one-click human
+# submission. "auto" (default) uses email wherever an authorized address exists
+# and queues everything else; "email" forces the email channel; "none" routes
+# everything to review. An unknown value is rejected, never treated as a live
+# submission path.
 adapter = "auto"
 daily_cap = 5
 answers_file = "answers.toml"

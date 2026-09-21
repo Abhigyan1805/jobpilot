@@ -49,6 +49,9 @@ def build_packet(plan: ApplicationPlan, out_dir: str) -> str:
         shutil.copy2(plan.cover.tex_path, dest)
         artifacts["cover_tex"] = str(dest)
 
+    matched_keywords = list(plan.match.coverage.matched)
+    gap_keywords = list(plan.match.coverage.missing)
+
     packet = {
         "source": posting.source,
         "stable_id": posting.stable_id,
@@ -60,17 +63,42 @@ def build_packet(plan: ApplicationPlan, out_dir: str) -> str:
         "score": round(plan.match.score, 4),
         "band": plan.match.band,
         "reasons": plan.match.reasons,
-        "missing_keywords": plan.missing_keywords,
+        "matched_keywords": matched_keywords,
+        "gap_keywords": gap_keywords,
+        "missing_keywords": gap_keywords,
         "red_flags": plan.red_flags,
         "review_reason": plan.review_reason,
         "artifacts": artifacts,
     }
     (packet_dir / "packet.json").write_text(json.dumps(packet, indent=2), encoding="utf-8")
 
+    (packet_dir / "requirements.md").write_text(
+        _requirements_markdown(matched_keywords, gap_keywords), encoding="utf-8"
+    )
+
     link = posting.apply_url or posting.url
     if link:
         (packet_dir / "apply_link.txt").write_text(link + "\n", encoding="utf-8")
     return str(packet_dir)
+
+
+def _requirements_markdown(matched: list[str], gaps: list[str]) -> str:
+    lines = ["# JD requirements vs. master profile", ""]
+    lines.append("## Matched (present in the profile)")
+    lines.append("")
+    if matched:
+        lines.extend(f"- {term}" for term in matched)
+    else:
+        lines.append("- (none)")
+    lines.append("")
+    lines.append("## Gaps (not in the profile; never inserted into the resume)")
+    lines.append("")
+    if gaps:
+        lines.extend(f"- {term}" for term in gaps)
+    else:
+        lines.append("- (none)")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def queue_plan(store: Store, plan: ApplicationPlan, out_dir: str) -> str:
@@ -93,6 +121,7 @@ def export_queue(store: Store, out_path: str, status: str = "pending") -> str:
                 "apply_url": row["apply_url"],
                 "score": row["score"],
                 "reasons": json.loads(row["reasons"] or "[]"),
+                "matched_keywords": json.loads(row["matched_keywords"] or "[]"),
                 "gaps": json.loads(row["gaps"] or "[]"),
                 "resume_pdf": row["resume_pdf"],
                 "cover_pdf": row["cover_pdf"],
@@ -121,6 +150,8 @@ def _to_markdown(items: list[dict]) -> str:
         lines.append(f"- apply: {item['apply_url']}")
         lines.append(f"- resume: {item['resume_pdf']}")
         lines.append(f"- cover: {item['cover_pdf']}")
+        if item.get("matched_keywords"):
+            lines.append(f"- matched: {', '.join(item['matched_keywords'][:15])}")
         if item["gaps"]:
             lines.append(f"- gaps: {', '.join(item['gaps'][:15])}")
         lines.append("")

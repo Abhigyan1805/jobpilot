@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS review_queue (
     score REAL,
     reasons TEXT,
     gaps TEXT,
+    matched_keywords TEXT,
     missing_keywords TEXT,
     resume_pdf TEXT,
     cover_pdf TEXT,
@@ -121,9 +122,12 @@ CREATE TABLE IF NOT EXISTS runs (
 
 
 # Review routes caused by a transient condition. Such a posting may be
-# auto-applied once the condition clears (the daily cap window resets, or a
-# submission channel/recipient is configured), so these reasons must not dedupe.
-TRANSIENT_REVIEW_REASONS = frozenset({"capped", "no_channel"})
+# auto-applied once the condition clears (the daily cap window resets, a
+# submission channel/recipient is configured, or auto-apply is re-enabled), so
+# these reasons must not dedupe. Reasons that encode a human decision
+# (``human_*``), an uncertain window/match, or a manual-only source stay
+# blocking.
+TRANSIENT_REVIEW_REASONS = frozenset({"capped", "no_channel", "config"})
 
 
 def utcnow() -> str:
@@ -149,6 +153,9 @@ class Store:
         cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(applications)")}
         if "review_reason" not in cols:
             self.conn.execute("ALTER TABLE applications ADD COLUMN review_reason TEXT")
+        rq_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(review_queue)")}
+        if "matched_keywords" not in rq_cols:
+            self.conn.execute("ALTER TABLE review_queue ADD COLUMN matched_keywords TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -380,12 +387,14 @@ class Store:
             """
             INSERT INTO review_queue (
                 stable_id, source, company, title, url, apply_url, score, reasons,
-                gaps, missing_keywords, resume_pdf, cover_pdf, packet_dir, status, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending', ?)
+                gaps, matched_keywords, missing_keywords, resume_pdf, cover_pdf, packet_dir,
+                status, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending', ?)
             ON CONFLICT(stable_id) DO UPDATE SET
                 score=excluded.score,
                 reasons=excluded.reasons,
                 gaps=excluded.gaps,
+                matched_keywords=excluded.matched_keywords,
                 missing_keywords=excluded.missing_keywords,
                 resume_pdf=excluded.resume_pdf,
                 cover_pdf=excluded.cover_pdf,
@@ -401,6 +410,7 @@ class Store:
                 plan.match.score,
                 json.dumps(plan.match.reasons),
                 json.dumps(plan.gaps),
+                json.dumps(list(plan.match.coverage.matched)),
                 json.dumps(plan.missing_keywords),
                 plan.resume.pdf_path if plan.resume else "",
                 plan.cover.pdf_path if plan.cover else "",

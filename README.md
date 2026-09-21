@@ -37,6 +37,28 @@ employer, date, metric or project.
    queue of uncertain / no-public-path applications with a direct link and the
    generated PDFs, plus a CLI to list, approve and export.
 
+### What submits automatically - and what does not
+
+There is exactly **one automatic submission channel: email**. It is used only
+when both of these are true:
+
+- the posting carries a structured, source-supplied application address (never an
+  address scraped from a job description's free text), optionally narrowed by
+  `apply.submission.email_allowlist`; and
+- you have configured SMTP under `[apply.submission.smtp]` in `config.toml`.
+
+**Without SMTP configured, nothing is auto-submitted.** Every strong match is
+still discovered, filtered, scored, tailored and compiled, but it is prepared as
+a link-out packet and placed in the review queue for one-click human submission.
+
+Greenhouse, Lever, Ashby and Workable are **link-out by design**: they expose no
+documented, verifiable public application endpoint, so this pipeline never POSTs
+to them. Their postings are prepared (tailored resume PDF, cover letter PDF,
+direct apply link, and the matched and gap JD keywords) and queued. LinkedIn is
+review-only by product decision. `apply.adapter = "none"` routes everything to
+review. An application is recorded as *submitted* only when it was actually sent
+through a genuine channel.
+
 ---
 
 ## Requirements
@@ -114,7 +136,9 @@ python -m jobpilot --config config.toml queue export --out review.md
 ```
 
 Each queued item has a packet directory with `resume.pdf`, `cover_letter.pdf`,
-`packet.json` and `apply_link.txt`, so approval is one click.
+`apply_link.txt`, `packet.json` and a human-readable `requirements.md` listing the
+JD keywords the profile matches and the gaps it does not, so approval is one
+click.
 
 ---
 

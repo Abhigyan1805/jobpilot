@@ -59,6 +59,9 @@ def cmd_queue(args) -> int:
                 )
                 print(f"      apply: {row['apply_url']}")
                 print(f"      resume: {row['resume_pdf']}")
+                if row["matched_keywords"]:
+                    matched = json.loads(row["matched_keywords"] or "[]")
+                    print(f"      matched: {', '.join(matched[:10])}")
                 if row["gaps"]:
                     gaps = json.loads(row["gaps"] or "[]")
                     print(f"      gaps: {', '.join(gaps[:10])}")

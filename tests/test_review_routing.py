@@ -61,6 +61,37 @@ class ReviewRoutingTests(unittest.TestCase):
         self.assertEqual(retry.status, "duplicate")
         self.assertFalse(self.store.has_submitted(capped.posting.stable_id))
 
+    def test_apply_disabled_review_reopens_once_enabled(self):
+        cfg = test_config(Path(self.tmp.name), apply={"enabled": False})
+        adapter = FakeAdapter(cfg)
+        applier = Applier(self.store, cfg, adapter, cfg.output.dir)
+        p = posting(job_id="cfg-enabled-1", description=IN_WINDOW)
+
+        first = applier.process(plan_for(p))
+        self.assertEqual(first.action, "review")
+        self.assertEqual(first.reason, "auto-apply disabled by config")
+        self.assertIn(p.stable_id, [r["stable_id"] for r in self.store.list_review("pending")])
+
+        cfg.apply.enabled = True
+        second = applier.process(plan_for(p))
+        self.assertEqual(second.status, "submitted")
+        self.assertTrue(self.store.has_submitted(p.stable_id))
+
+    def test_auto_apply_disabled_review_reopens_once_reenabled(self):
+        cfg = test_config(Path(self.tmp.name), apply={"auto_apply_strong": False})
+        adapter = FakeAdapter(cfg)
+        applier = Applier(self.store, cfg, adapter, cfg.output.dir)
+        p = posting(job_id="cfg-strong-1", description=IN_WINDOW)
+
+        first = applier.process(plan_for(p))
+        self.assertEqual(first.action, "review")
+        self.assertIn(p.stable_id, [r["stable_id"] for r in self.store.list_review("pending")])
+
+        cfg.apply.auto_apply_strong = True
+        second = applier.process(plan_for(p))
+        self.assertEqual(second.status, "submitted")
+        self.assertTrue(self.store.has_submitted(p.stable_id))
+
     def test_no_channel_review_reopens_once_recipient_configured(self):
         cfg = test_config(Path(self.tmp.name))
         answers = AnswerBook(answers={"email": "me@example.com"}, profile=mini_profile())
