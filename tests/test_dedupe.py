@@ -3,10 +3,24 @@ import unittest
 from pathlib import Path
 
 from jobpilot.applying.applier import Applier
+from jobpilot.models import SubmissionResult
 from jobpilot.store import Store
 from tests.helpers import FakeAdapter, plan_for, posting, test_config
 
 IN_WINDOW = "Machine learning internship, January 2026 - June 2026. Python, RAG."
+
+
+class FlakyAdapter(FakeAdapter):
+    """Fails the first submission, succeeds on a later retry."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.statuses = ["failed", "submitted"]
+
+    def submit(self, plan):
+        status = self.statuses.pop(0)
+        self.calls.append(plan.posting.stable_id)
+        return SubmissionResult(status=status, detail=status, adapter=self.name)
 
 
 class DedupeTests(unittest.TestCase):
@@ -42,6 +56,17 @@ class DedupeTests(unittest.TestCase):
         self.applier.process(plan_for(posting(job_id="a", description=IN_WINDOW)))
         self.applier.process(plan_for(posting(job_id="b", description=IN_WINDOW)))
         self.assertEqual(len(self.adapter.calls), 2)
+
+    def test_failed_attempt_can_be_retried(self):
+        adapter = FlakyAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        plan = plan_for(posting(job_id="flaky-1", description=IN_WINDOW))
+        first = applier.process(plan)
+        second = applier.process(plan)
+        self.assertEqual(first.status, "failed")
+        self.assertEqual(second.status, "submitted")
+        self.assertEqual(len(adapter.calls), 2)
+        self.assertTrue(self.store.has_submitted(plan.posting.stable_id))
 
 
 if __name__ == "__main__":

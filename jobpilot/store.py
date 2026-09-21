@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS applications (
     gaps TEXT,
     red_flags TEXT,
     adapter TEXT,
+    review_reason TEXT,
     resume_tex TEXT,
     resume_pdf TEXT,
     resume_text TEXT,
@@ -119,6 +120,12 @@ CREATE TABLE IF NOT EXISTS runs (
 """
 
 
+# Review routes caused by a transient condition. Such a posting may be
+# auto-applied once the condition clears (the daily cap window resets, or a
+# submission channel/recipient is configured), so these reasons must not dedupe.
+TRANSIENT_REVIEW_REASONS = frozenset({"capped", "no_channel"})
+
+
 def utcnow() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -135,7 +142,13 @@ class Store:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(applications)")}
+        if "review_reason" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN review_reason TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -246,15 +259,27 @@ class Store:
 
     # ------------------------------------------------------------ applications
     def submitted_or_attempted(self, stable_id: str) -> sqlite3.Row | None:
-        cur = self.conn.execute(
-            """
-            SELECT * FROM applications
-            WHERE stable_id = ? AND status IN ('submitting','submitted','failed','manual_required')
-            ORDER BY id DESC LIMIT 1
-            """,
+        """Return the record that must block another submission, if any.
+
+        Only an in-flight submit, a completed submit, or a human-in-the-loop
+        review route blocks. A transient review route (daily cap reached, or no
+        submission channel configured yet) does not block, so the posting can be
+        auto-applied once the condition clears; a failed attempt does not block
+        either, so it can be retried.
+        """
+        rows = self.conn.execute(
+            "SELECT * FROM applications WHERE stable_id = ? ORDER BY id DESC",
             (stable_id,),
-        )
-        return cur.fetchone()
+        ).fetchall()
+        for row in rows:
+            status = row["status"]
+            if status in ("submitting", "submitted"):
+                return row
+            if status == "manual_required":
+                if (row["review_reason"] or "") in TRANSIENT_REVIEW_REASONS:
+                    continue
+                return row
+        return None
 
     def has_submitted(self, stable_id: str) -> bool:
         cur = self.conn.execute(
@@ -263,16 +288,24 @@ class Store:
         )
         return cur.fetchone() is not None
 
-    def create_application(self, plan: ApplicationPlan, *, status: str, mode: str, adapter: str = "") -> int:
+    def create_application(
+        self,
+        plan: ApplicationPlan,
+        *,
+        status: str,
+        mode: str,
+        adapter: str = "",
+        review_reason: str = "",
+    ) -> int:
         now = utcnow()
         p, m = plan.posting, plan.match
         cur = self.conn.execute(
             """
             INSERT INTO applications (
                 stable_id, company, title, url, apply_url, status, mode, score, gaps,
-                red_flags, adapter, resume_tex, resume_pdf, resume_text, cover_tex,
-                cover_pdf, cover_text, parseability_ok, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                red_flags, adapter, review_reason, resume_tex, resume_pdf, resume_text,
+                cover_tex, cover_pdf, cover_text, parseability_ok, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 p.stable_id,
@@ -286,6 +319,7 @@ class Store:
                 json.dumps(plan.gaps),
                 json.dumps(plan.red_flags),
                 adapter,
+                review_reason,
                 plan.resume.tex_path if plan.resume else "",
                 plan.resume.pdf_path if plan.resume else "",
                 plan.resume.text if plan.resume else "",
@@ -310,6 +344,16 @@ class Store:
             """,
             (status, outcome, error, utcnow(), submitted, app_id),
         )
+        if status == "submitted":
+            row = self.conn.execute(
+                "SELECT stable_id FROM applications WHERE id = ?", (app_id,)
+            ).fetchone()
+            if row is not None:
+                self.conn.execute(
+                    "UPDATE review_queue SET status='superseded', decided_at=? "
+                    "WHERE stable_id=? AND status='pending'",
+                    (utcnow(), row["stable_id"]),
+                )
         self.conn.commit()
 
     # ----------------------------------------------------------------- attempts
@@ -377,9 +421,19 @@ class Store:
         return self.conn.execute("SELECT * FROM review_queue WHERE id = ?", (review_id,)).fetchone()
 
     def decide_review(self, review_id: int, status: str) -> sqlite3.Row | None:
+        row = self.get_review(review_id)
+        if row is None:
+            return None
         self.conn.execute(
             "UPDATE review_queue SET status=?, decided_at=? WHERE id=?",
             (status, utcnow(), review_id),
+        )
+        # A human decision closes the route for good: the posting must never be
+        # auto-submitted afterwards, even if the original route was transient.
+        self.conn.execute(
+            "UPDATE applications SET review_reason=?, updated_at=? "
+            "WHERE stable_id=? AND status='manual_required'",
+            (f"human_{status}", utcnow(), row["stable_id"]),
         )
         self.conn.commit()
         return self.get_review(review_id)

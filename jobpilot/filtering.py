@@ -13,9 +13,11 @@ from jobpilot.models import CheckResult, FilterResult, JobPosting
 from jobpilot.window import WindowInfo, classify_window
 
 # Countries/regions that, if the only location named, mean onsite work there.
+# Country tokens are matched as whole words, so a bare "us" catches "Remote, US",
+# "Remote (US)" and "US - Remote" as well as "usa" / "u.s.".
 ABROAD_TERMS = [
-    "united states", "usa", "u.s.", " us,", "us only", "us-remote", "remote - us",
-    "united kingdom", " uk,", "canada", "germany", "france", "netherlands",
+    "united states", "usa", "u.s.", "u.s", "us",
+    "united kingdom", "uk", "canada", "germany", "france", "netherlands",
     "singapore", "australia", "japan", "china", "brazil", "mexico", "poland",
     "spain", "italy", "ireland", "switzerland", "sweden", "uae", "dubai",
     "emea", "apac", "latam", "europe",

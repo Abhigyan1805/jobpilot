@@ -100,6 +100,18 @@ class FilteringTests(unittest.TestCase):
         )
         self.assertFalse(filter_posting(p, self.cfg.filter).eligible)
 
+    def test_us_remote_token_forms_rejected(self):
+        for location in ("Remote, US", "Remote (US)", "US - Remote", "Remote - U.S.", "Remote, USA"):
+            p = posting(
+                title="Machine Learning Intern",
+                location=location,
+                is_remote=True,
+                description="Machine learning internship January 2026 - June 2026.",
+            )
+            result = filter_posting(p, self.cfg.filter)
+            self.assertFalse(result.eligible, location)
+            self.assertTrue(any("india" in r for r in result.reject_reasons), location)
+
     def test_us_only_intern_rejected(self):
         p = posting(
             title="Research Intern",

@@ -50,14 +50,14 @@ class Applier:
         if posting.source == "linkedin":
             plan.requires_review = True
             self._add_reason(plan, "LinkedIn: discovered and tailored, but never auto-submitted (captain applies)")
-            return self._to_review(plan, "linkedin_review")
+            return self._to_review(plan, "linkedin_review", "linkedin")
 
         # Guard 1b: a plan flagged during generation (compile failure,
         # no-invention, unparseable PDF) is never auto-submitted.
         if plan.requires_review:
             if not plan.review_reason:
                 plan.review_reason = "flagged for review by generation checks"
-            return self._to_review(plan, "requires_review")
+            return self._to_review(plan, "requires_review", "generation")
 
         # Guard 1c: an unconfirmed Jan-Jun window is never auto-applied unless
         # the user explicitly loosened it. The posting is still scored and
@@ -68,7 +68,7 @@ class Applier:
                 self._add_reason(
                     plan, "Jan-Jun window unconfirmed; review before applying"
                 )
-                return self._to_review(plan, "window_review")
+                return self._to_review(plan, "window_review", "window")
 
         # Guard 2: only strong matches auto-apply.
         if plan.match.band != "strong":
@@ -77,15 +77,15 @@ class Applier:
                 f"score {plan.match.score:.2f} below strong-match threshold "
                 f"{self.config.match.strong_threshold:.2f}",
             )
-            return self._to_review(plan, "shortlist_review")
+            return self._to_review(plan, "shortlist_review", "match")
 
         if not self.config.apply.enabled:
             self._add_reason(plan, "auto-apply disabled by config")
-            return self._to_review(plan, "review")
+            return self._to_review(plan, "review", "config")
 
         if not self.config.apply.auto_apply_strong:
             self._add_reason(plan, "auto-apply of strong matches disabled by config (apply.auto_apply_strong)")
-            return self._to_review(plan, "review")
+            return self._to_review(plan, "review", "config")
 
         # Guard 3 (dedupe): never touch a posting already recorded.
         existing = self.store.submitted_or_attempted(posting.stable_id)
@@ -97,7 +97,7 @@ class Applier:
         ok, reason = self.adapter.can_submit(plan)
         if not ok:
             self._add_reason(plan, reason)
-            return self._to_review(plan, "manual_required")
+            return self._to_review(plan, "manual_required", "no_channel")
 
         # Guard 5: daily cap.
         cap = int(self.config.apply.daily_cap)
@@ -105,7 +105,7 @@ class Applier:
         if used >= cap:
             self._add_reason(plan, f"daily cap reached ({used}/{cap})")
             self.store.record_attempt(posting.stable_id, adapter=self.adapter.name, status="capped", detail=plan.review_reason)
-            return self._to_review(plan, "capped")
+            return self._to_review(plan, "capped", "capped")
 
         # Dry run: record intent, never submit.
         if dry_run:
@@ -135,9 +135,13 @@ class Applier:
             self.store.update_application(app_id, status="failed", error=result.detail)
         return ApplyOutcome("submit", result.status, result.detail, app_id)
 
-    def _to_review(self, plan: ApplicationPlan, status: str) -> ApplyOutcome:
+    def _to_review(self, plan: ApplicationPlan, status: str, reason: str) -> ApplyOutcome:
         app_id = self.store.create_application(
-            plan, status="manual_required", mode="review", adapter=self.adapter.name
+            plan,
+            status="manual_required",
+            mode="review",
+            adapter=self.adapter.name,
+            review_reason=reason,
         )
         queue_plan(self.store, plan, self.out_dir)
         return ApplyOutcome("review", status, plan.review_reason, app_id)

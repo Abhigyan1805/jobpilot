@@ -7,6 +7,7 @@ directory also holds a machine-readable ``packet.json`` for export.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -24,7 +25,9 @@ def safe_filename(text: str, max_length: int = 60) -> str:
 def build_packet(plan: ApplicationPlan, out_dir: str) -> str:
     """Copy artifacts into a per-application packet directory; return its path."""
     posting = plan.posting
-    name = safe_filename(f"{posting.source}-{posting.company}-{posting.title}-{posting.job_id}")
+    slug = safe_filename(f"{posting.source}-{posting.company}-{posting.title}", max_length=48)
+    digest = hashlib.sha1(posting.stable_id.encode("utf-8")).hexdigest()[:10]
+    name = f"{slug}-{digest}"
     packet_dir = Path(out_dir) / "review" / name
     packet_dir.mkdir(parents=True, exist_ok=True)
 
