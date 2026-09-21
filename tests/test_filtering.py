@@ -149,6 +149,36 @@ class FilteringTests(unittest.TestCase):
         self.assertTrue(assessment.eligible)
         self.assertFalse(assessment.auto_apply_ok)
 
+    def test_security_clearance_only_in_description_blocks_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Must be eligible for a security clearance."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertFalse(assessment.auto_apply_ok)
+
+    def test_global_tagged_us_restriction_only_in_description_blocks_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote - Worldwide",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Candidates must be located in the United States."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertFalse(assessment.auto_apply_ok)
+
     def test_fulltime_signal_in_description_is_not_rejected_but_flagged(self):
         p = posting(
             title="Software Engineer",

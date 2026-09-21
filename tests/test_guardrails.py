@@ -123,6 +123,40 @@ class GuardrailTests(unittest.TestCase):
         queued = [r["stable_id"] for r in self.store.list_review("pending")]
         self.assertIn(p.stable_id, queued)
 
+    def test_security_clearance_only_in_description_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-loc-clearance-1",
+            location="Remote",
+            is_remote=True,
+            description=IN_WINDOW + " Must be eligible for a security clearance.",
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
+    def test_global_tagged_us_restriction_only_in_description_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="filter-loc-global-1",
+            location="Remote - Worldwide",
+            is_remote=True,
+            description=IN_WINDOW + " Candidates must be located in the United States.",
+        )
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(p.stable_id, queued)
+
     def test_fulltime_role_mentioning_interns_never_auto_submitted(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)

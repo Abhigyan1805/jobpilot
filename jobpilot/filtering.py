@@ -118,7 +118,7 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
     india_local = _find(location, cfg.india_keywords)
     abroad_local = _find(location, ABROAD_TERMS)
     global_local = _find(location, GLOBAL_TERMS)
-    location_names_country = bool(india_local or abroad_local or global_local)
+    location_names_country = bool(india_local or abroad_local)
     remote = posting.is_remote is True or _find(location, cfg.remote_keywords) is not None
 
     reject_local = _find(location, cfg.location_reject_keywords)
@@ -132,7 +132,7 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
                 0.0, False, f"location/work-authorization restriction: {reject_prose!r}"
             )
     else:
-        prose = _find(desc[:600], WORK_AUTH_PROSE_TERMS)
+        prose = _find(desc[:600], [*cfg.location_reject_keywords, *WORK_AUTH_PROSE_TERMS])
         if prose:
             return LocationAssessment(
                 0.85 if remote else 0.5,
