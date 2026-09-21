@@ -55,6 +55,16 @@ def _find(text: str, terms: list[str]) -> str | None:
     return None
 
 
+def _named_place_tokens(location: str, cfg) -> list[str]:
+    """Location tokens left after removing remote/global qualifiers."""
+    text = (location or "").lower()
+    for term in [*GLOBAL_TERMS, *cfg.remote_keywords]:
+        term = (term or "").lower().strip()
+        if term:
+            text = re.sub(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", " ", text)
+    return re.findall(r"[a-z0-9]+", text)
+
+
 def is_internship(posting: JobPosting, cfg) -> bool:
     haystack = f"{posting.title} {posting.employment_type} {posting.description[:1500]}"
     return _find(haystack, cfg.internship_keywords) is not None
@@ -150,16 +160,24 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
 
     # The structured location names a place that is neither a recognised country
     # nor an explicit remote/global form. It is not confirmably open to India, so
-    # a description-level India mention or a bare remote flag must not promote it
-    # to auto-apply; route it to the review queue instead.
-    if location.strip() and not location_names_country and not remote_local and not global_local:
-        if _find(combined, cfg.india_keywords) or posting.is_remote is True:
-            return LocationAssessment(
-                0.5,
-                True,
-                f"location {posting.location!r} is not confirmably open to India; review before applying",
-                auto_apply_ok=False,
-            )
+    # a description-level India mention or a remote tag must not promote it to
+    # auto-apply; route it to the review queue instead. A remote keyword only
+    # counts as an explicit remote form when no other place token remains.
+    unrecognized_place = (
+        bool(location.strip())
+        and not location_names_country
+        and not global_local
+        and bool(_named_place_tokens(location, cfg))
+    )
+    if unrecognized_place and (
+        _find(combined, cfg.india_keywords) or posting.is_remote is True or remote_local is not None
+    ):
+        return LocationAssessment(
+            0.5,
+            True,
+            f"location {posting.location!r} is not confirmably open to India; review before applying",
+            auto_apply_ok=False,
+        )
 
     if not location_names_country and _find(combined, cfg.india_keywords):
         return LocationAssessment(0.9, True, "India mentioned in posting")

@@ -1,6 +1,6 @@
 import unittest
 
-from jobpilot.filtering import assess_location, filter_posting
+from jobpilot.filtering import assess_location, filter_posting, review_only_reasons
 from jobpilot.window import classify_window
 from tests.helpers import posting, test_config
 
@@ -126,6 +126,59 @@ class FilteringTests(unittest.TestCase):
         )
         assessment = assess_location(p, self.cfg.filter)
         self.assertFalse(assessment.auto_apply_ok)
+
+    def test_remote_tag_with_foreign_place_does_not_auto_apply(self):
+        for location in ("Remote - Toronto", "Remote, San Francisco, CA", "Remote (London)"):
+            for is_remote in (True, None):
+                p = posting(
+                    title="Machine Learning Intern",
+                    location=location,
+                    is_remote=is_remote,
+                    description=(
+                        "Our global hubs include Bengaluru, India. Machine learning "
+                        "internship January 2026 - June 2026. Python, RAG, LLMs."
+                    ),
+                )
+                assessment = assess_location(p, self.cfg.filter)
+                self.assertTrue(assessment.eligible, (location, is_remote))
+                self.assertFalse(assessment.auto_apply_ok, (location, is_remote))
+
+    def test_remote_tag_with_foreign_place_blocks_auto_apply_via_filter(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote - Toronto",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Our global hubs include Bengaluru, India."
+            ),
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        blockers = review_only_reasons(p, self.cfg.filter)
+        self.assertTrue(any("not confirmably open to India" in b for b in blockers), blockers)
+
+    def test_bare_remote_tag_can_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Remote",
+            is_remote=True,
+            description=(
+                "Machine learning internship January 2026 - June 2026. "
+                "Open to candidates based in India."
+            ),
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertTrue(assessment.auto_apply_ok)
+
+    def test_india_location_can_auto_apply(self):
+        p = posting(
+            title="Machine Learning Intern",
+            location="Bengaluru, India",
+            description="Machine learning internship January 2026 - June 2026.",
+        )
+        assessment = assess_location(p, self.cfg.filter)
+        self.assertTrue(assessment.auto_apply_ok)
 
     def test_india_mention_without_structured_country_is_eligible(self):
         p = posting(
