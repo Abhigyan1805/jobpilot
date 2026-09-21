@@ -268,6 +268,7 @@ def _postings_from_store(store: Store) -> list[JobPosting]:
             description=row["description"] or "",
             employment_type=row["employment_type"] or "",
             published_at=row["published_at"] or "",
+            is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
         )
         for row in rows
     ]

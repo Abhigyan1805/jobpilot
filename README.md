@@ -242,7 +242,11 @@ reported; the rest of the run continues.
 
 The local-file adapter (`[sources.local]`) reads a JSON posting list and exists for
 offline verification, fixtures and the demo; it is a demonstration that sources are
-genuinely pluggable.
+genuinely pluggable. Because it can carry a structured `apply_email`, it is also the
+demonstrable automatic-application path: seed a posting with `apply_email` set,
+configure SMTP, and a strong match is submitted by the email channel. None of the
+default ATS discovery sources supply an application address, so without that (or
+another source that does) strong matches are queued for review rather than applied.
 
 ---
 
