@@ -1,0 +1,99 @@
+# jobpilot configuration
+# Copy this file to config.toml and edit. config.toml is git-ignored so your
+# paths and answers never get committed.
+
+[profile]
+# Read-only master profile (single source of truth for resume facts).
+path = "/mnt/d/LaTeX/resume/PROFILE.md"
+# Read-only resume whose LaTeX preamble defines the style we preserve.
+style_template = "/mnt/d/LaTeX/resume/Abhigyan_Resume_AI_ML.tex"
+# LaTeX engine used to compile the tailored .tex to PDF.
+pdflatex = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdflatex.exe"
+# Text extractor used for the PDF parseability check (ships with the engine).
+pdftotext = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdftotext.exe"
+compile_timeout = 120
+
+[output]
+dir = "out"
+database = "jobpilot.db"
+
+# ---------------------------------------------------------------------------
+# Discovery sources. Each is a public, unauthenticated read-only endpoint.
+# Replace the example board tokens with the companies you care about.
+# ---------------------------------------------------------------------------
+[sources.greenhouse]
+enabled = true
+tokens = ["vercel", "canonical", "stripe"]
+
+[sources.lever]
+enabled = true
+tokens = ["spotify"]
+
+[sources.ashby]
+enabled = true
+tokens = ["openai", "ramp"]
+
+[sources.workable]
+enabled = true
+tokens = ["skillshare"]
+
+# Optional, disabled by default. Read-only, never authenticates, never applies.
+# NOTE: reading LinkedIn this way is against their Terms of Service and is
+# best-effort; it may stop working at any time. See README.
+[linkedin]
+enabled = false
+keywords = "intern"
+location = "India"
+max_pages = 1
+requests_per_second = 0.2
+max_results = 25
+
+# ---------------------------------------------------------------------------
+# Hard filters
+# ---------------------------------------------------------------------------
+[filter]
+allow_unknown_window = true      # an internship with no stated dates is allowed
+allow_onsite_abroad = false      # onsite roles outside India are rejected
+allow_unknown_location = false   # a posting with no location is rejected
+window_start_month = 1
+window_end_month = 6
+
+# ---------------------------------------------------------------------------
+# Matching rubric (deterministic; ranks for review, does not predict outcomes)
+# ---------------------------------------------------------------------------
+[match]
+shortlist_threshold = 0.42       # tailors + queues for review at/above this
+strong_threshold = 0.68          # auto-applies at/above this (where a path exists)
+require_parseable = true
+min_keyword_survival = 0.5
+max_projects = 4
+include_positions = false
+include_non_ai_experience = false
+bold_metrics = true
+
+[match.weights]
+skill_coverage = 0.45
+role_relevance = 0.25
+location_fit = 0.15
+window_fit = 0.10
+seniority_fit = 0.05
+
+# ---------------------------------------------------------------------------
+# Applying
+# ---------------------------------------------------------------------------
+[apply]
+enabled = true
+auto_apply_strong = true
+# "none" routes everything to the review queue (no improvised form filling).
+# "email" submits to an application email found in the posting, if SMTP is set.
+adapter = "none"
+daily_cap = 5
+answers_file = "answers.toml"
+
+# [apply.submission.smtp]
+# host = "smtp.example.com"
+# port = 587
+# starttls = true
+# from = "you@example.com"
+# username = "you@example.com"
+# password = "app-password-here"

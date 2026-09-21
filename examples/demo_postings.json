@@ -1,0 +1,48 @@
+{
+  "jobs": [
+    {
+      "id": "demo-ai-intern-001",
+      "company": "Aurora Labs",
+      "title": "Machine Learning Intern - Applied AI",
+      "location": "Bengaluru, India",
+      "employment_type": "Internship",
+      "published_at": "2026-09-01",
+      "is_remote": false,
+      "url": "https://example.com/aurora/ml-intern",
+      "description": "About the role\n\nWe are hiring a Machine Learning Intern for a January 2027 - June 2027 internship in our Applied AI team in Bengaluru. You will work on LLM and RAG systems, prompt engineering, model evaluation and predictive modeling over real datasets.\n\nWhat you will do\n- Build and evaluate retrieval augmented generation (RAG) pipelines with Python and PyTorch\n- Run offline model evaluation, benchmark and error analysis using statistics and confidence intervals\n- Work on time series forecasting and data analysis with pandas, NumPy and scikit-learn\n- Write SQL to query data and collaborate with research and product teams\n\nWhat we look for\n- Strong Python, machine learning and data analysis fundamentals\n- Experience with LLMs, generative AI, NLP and evaluation\n- Familiarity with Git and Docker\n- Currently enrolled student, available to join in India"
+    },
+    {
+      "id": "demo-data-intern-002",
+      "company": "Northwind Data",
+      "title": "Data Science Intern (Remote)",
+      "location": "Remote - Worldwide",
+      "employment_type": "Intern",
+      "published_at": "2026-09-02",
+      "is_remote": true,
+      "url": "https://example.com/northwind/ds-intern",
+      "description": "Summer 2027 Data Science Internship, fully remote and open worldwide.\n\n- Analyze large datasets with Python, pandas and NumPy\n- Build predictive models with scikit-learn and evaluate them with proper statistics\n- Create data visualization and dashboards for stakeholders\n- Explore NLP and forecasting use cases\n- Communicate findings to cross-functional teams\n\nThis is a paid internship running May to August 2027."
+    },
+    {
+      "id": "demo-fulltime-003",
+      "company": "BigCorp",
+      "title": "Senior Software Engineer, Backend",
+      "location": "Bengaluru, India",
+      "employment_type": "FullTime",
+      "published_at": "2026-09-03",
+      "is_remote": false,
+      "url": "https://example.com/bigcorp/senior-swe",
+      "description": "Full-time senior role. 8+ years of experience required. Lead a team building backend services in Python and SQL. This is not an internship."
+    },
+    {
+      "id": "demo-us-intern-004",
+      "company": "Bay Area AI",
+      "title": "Research Intern - Machine Learning",
+      "location": "San Francisco, United States",
+      "employment_type": "Intern",
+      "published_at": "2026-09-04",
+      "is_remote": false,
+      "url": "https://example.com/bayarea/research-intern",
+      "description": "Summer 2027 research internship on machine learning and deep learning. Must be authorized to work in the US; onsite in San Francisco. Python, PyTorch and research experience required."
+    }
+  ]
+}
