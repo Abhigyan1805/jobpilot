@@ -264,6 +264,7 @@ def _postings_from_store(store: Store) -> list[JobPosting]:
             title=row["title"] or "",
             url=row["url"] or "",
             apply_url=row["apply_url"] or "",
+            apply_email=row["apply_email"] or "",
             location=row["location"] or "",
             description=row["description"] or "",
             employment_type=row["employment_type"] or "",

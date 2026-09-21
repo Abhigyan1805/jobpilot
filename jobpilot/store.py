@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS postings (
     title TEXT,
     url TEXT,
     apply_url TEXT,
+    apply_email TEXT,
     location TEXT,
     employment_type TEXT,
     published_at TEXT,
@@ -156,6 +157,9 @@ class Store:
         rq_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(review_queue)")}
         if "matched_keywords" not in rq_cols:
             self.conn.execute("ALTER TABLE review_queue ADD COLUMN matched_keywords TEXT")
+        posting_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(postings)")}
+        if "apply_email" not in posting_cols:
+            self.conn.execute("ALTER TABLE postings ADD COLUMN apply_email TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -176,15 +180,16 @@ class Store:
         self.conn.execute(
             """
             INSERT INTO postings (
-                stable_id, source, job_id, company, title, url, apply_url, location,
-                employment_type, published_at, description, is_remote, eligible,
+                stable_id, source, job_id, company, title, url, apply_url, apply_email,
+                location, employment_type, published_at, description, is_remote, eligible,
                 window_label, window_confidence, reject_reasons, seen_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(stable_id) DO UPDATE SET
                 company=excluded.company,
                 title=excluded.title,
                 url=excluded.url,
                 apply_url=excluded.apply_url,
+                apply_email=excluded.apply_email,
                 location=excluded.location,
                 employment_type=excluded.employment_type,
                 published_at=excluded.published_at,
@@ -204,6 +209,7 @@ class Store:
                 posting.title,
                 posting.url,
                 posting.apply_url or posting.url,
+                posting.apply_email,
                 posting.location,
                 posting.employment_type,
                 posting.published_at,

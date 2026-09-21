@@ -441,6 +441,21 @@ class FilteringTests(unittest.TestCase):
         blockers = review_only_reasons(p, self.cfg.filter)
         self.assertTrue(any("ambiguous" in b for b in blockers), blockers)
 
+    def test_intern_fulltime_token_in_title_is_visible_and_reviewed(self):
+        p = posting(
+            title="Machine Learning Intern (Full-Time)",
+            employment_type="Internship",
+            location="Bengaluru, India",
+            description="Machine learning internship January 2026 - June 2026.",
+        )
+        result = filter_posting(p, self.cfg.filter)
+        self.assertTrue(result.eligible, result.reject_reasons)
+        fulltime = next(c for c in result.checks if c.name == "fulltime")
+        self.assertTrue(fulltime.passed)
+        self.assertTrue(fulltime.review_only)
+        blockers = review_only_reasons(p, self.cfg.filter)
+        self.assertTrue(any("ambiguous" in b for b in blockers), blockers)
+
     def test_clearly_fulltime_title_tagged_fulltime_is_rejected(self):
         p = posting(
             title="Graduate Program - Software Engineer",

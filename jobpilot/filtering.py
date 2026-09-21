@@ -103,10 +103,11 @@ def fulltime_check(posting: JobPosting, cfg) -> CheckResult:
     hit = _find(structured, cfg.fulltime_reject_keywords)
     if hit:
         # ATS boards routinely tag genuine internships with a generic
-        # "FullTime" employment type. When the title itself identifies an
-        # internship, that clash is ambiguous, not a hard full-time rejection:
-        # keep the posting visible and route it to a human instead.
-        if _find(title, cfg.internship_keywords) and not _find(title, cfg.fulltime_reject_keywords):
+        # "FullTime" employment type, and frequently title them "... Intern
+        # (Full-Time)". Whenever the title itself identifies an internship,
+        # that clash is ambiguous, not a hard full-time rejection: keep the
+        # posting visible and route it to a human instead.
+        if _find(title, cfg.internship_keywords):
             return CheckResult(
                 "fulltime",
                 True,
