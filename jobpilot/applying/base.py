@@ -1,9 +1,12 @@
 """Submission adapter interface.
 
-There is deliberately no generic "fill any web form" adapter. Where a board has
-no stable public submission path, the pipeline does not improvise - it routes
-the application to the review queue with everything needed to approve it in one
-click.
+There is deliberately no generic "fill any web form" adapter. The only channel
+that submits automatically is email to an explicit, source-supplied application
+address (and only when SMTP is configured). Greenhouse, Lever, Ashby and
+Workable do not expose a documented, verifiable public application endpoint, so
+they are never submitted programmatically - each is prepared as a link-out
+packet (tailored resume, cover letter and direct apply link) and routed to the
+review queue for a one-click human submission. No endpoint is ever improvised.
 """
 
 from __future__ import annotations
@@ -133,11 +136,19 @@ class EmailAdapter(SubmissionAdapter):
 
 
 def build_adapter(config: Config, answers: AnswerBook) -> SubmissionAdapter:
-    kind = (config.apply.adapter or "auto").lower()
-    if kind == "email":
+    """Build the submission adapter for ``apply.adapter``.
+
+    ``auto`` (default) and ``email`` use the email channel wherever the source
+    supplies an authorized structured application address; everything else is
+    routed to the review queue as a link-out packet. ``none`` never submits.
+    Any other value raises rather than silently activating a submission path.
+    """
+    kind = (config.apply.adapter or "auto").strip().lower()
+    if kind in ("auto", "email"):
         return EmailAdapter(config, answers)
     if kind == "none":
         return NoPublicPathAdapter(config, answers)
-    from jobpilot.applying.ats import AtsAdapter
-
-    return AtsAdapter(config, answers)
+    raise ValueError(
+        f"unknown apply.adapter {config.apply.adapter!r}; "
+        "expected 'auto', 'email' or 'none'"
+    )

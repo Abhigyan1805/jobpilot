@@ -1,28 +1,33 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from jobpilot.answers import AnswerBook
 from jobpilot.applying.applier import Applier
-from jobpilot.applying.ats import AtsAdapter
 from jobpilot.applying.base import EmailAdapter, build_adapter
 from jobpilot.models import ApplicationPlan, GeneratedResume
 from jobpilot.store import Store
 from tests.helpers import mini_profile, posting, strong_match, test_config
 
 
-class FakeTransport:
-    def __init__(self, status: int = 200, body: str = "ok"):
-        self.status = status
-        self.body = body
-        self.calls: list[tuple[str, dict, dict]] = []
+class _FakeHttpResponse:
+    status = 200
 
-    def __call__(self, url, fields, files):
-        self.calls.append((url, fields, files))
-        return self.status, self.body
+    def __init__(self, body: bytes = b"<html>ok</html>"):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
-class AtsSubmissionTests(unittest.TestCase):
+class LinkOutSubmissionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.cfg = test_config(Path(self.tmp.name))
@@ -40,8 +45,10 @@ class AtsSubmissionTests(unittest.TestCase):
             },
             profile=mini_profile(),
         )
+        self.store = Store(":memory:")
 
     def tearDown(self):
+        self.store.close()
         self.tmp.cleanup()
 
     def _plan(self, p):
@@ -49,71 +56,61 @@ class AtsSubmissionTests(unittest.TestCase):
         plan.resume = GeneratedResume(pdf_path=str(self.pdf))
         return plan
 
-    def test_greenhouse_maps_fields_and_posts_resume(self):
-        transport = FakeTransport()
-        adapter = AtsAdapter(self.cfg, self.answers, transport=transport)
-        plan = self._plan(
-            posting(source="greenhouse", job_id="123", apply_url="https://boards.greenhouse.io/acme/jobs/123")
+    def test_ats_board_is_routed_to_review_with_direct_link(self):
+        adapter = build_adapter(self.cfg, self.answers)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            job_id="gh-1",
+            description="Machine learning internship, January 2026 - June 2026. Python, RAG.",
+            apply_url="https://boards.greenhouse.io/acme/jobs/123",
         )
-        ok, reason = adapter.can_submit(plan)
-        self.assertTrue(ok, reason)
-        result = adapter.submit(plan)
-        self.assertEqual(result.status, "submitted")
-        url, fields, files = transport.calls[0]
-        self.assertEqual(url, "https://boards.greenhouse.io/acme/jobs/123")
-        self.assertEqual(fields["first_name"], "Abhigyan")
-        self.assertEqual(fields["last_name"], "Sharma")
-        self.assertEqual(fields["email"], "abhigyan@example.com")
-        self.assertIn("resume", files)
-        self.assertEqual(files["resume"][2], "application/pdf")
-
-    def test_lever_uses_public_apply_endpoint(self):
-        transport = FakeTransport()
-        adapter = AtsAdapter(self.cfg, self.answers, transport=transport)
-        plan = self._plan(
-            posting(source="lever", job_id="abc", apply_url="https://jobs.lever.co/spotify/abc/apply")
+        outcome = applier.process(self._plan(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        rows = self.store.list_review("pending")
+        self.assertIn(p.stable_id, [r["stable_id"] for r in rows])
+        packet = Path(rows[0]["packet_dir"])
+        self.assertEqual(
+            (packet / "apply_link.txt").read_text(encoding="utf-8").strip(),
+            "https://boards.greenhouse.io/acme/jobs/123",
         )
-        result = adapter.submit(plan)
-        self.assertEqual(result.status, "submitted")
-        url, fields, _files = transport.calls[0]
-        self.assertEqual(url, "https://jobs.lever.co/spotify/abc/apply")
-        self.assertEqual(fields["name"], "Abhigyan Sharma")
-        self.assertEqual(fields["urls[GitHub]"], "https://github.com/abhigyan")
 
-    def test_missing_required_field_is_refused(self):
-        transport = FakeTransport()
-        adapter = AtsAdapter(self.cfg, AnswerBook(answers={}, profile=None), transport=transport)
-        plan = self._plan(
-            posting(source="greenhouse", job_id="9", apply_url="https://boards.greenhouse.io/acme/jobs/9")
+    def test_html_apply_page_is_never_posted_or_recorded_submitted(self):
+        adapter = build_adapter(self.cfg, self.answers)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(
+            source="lever",
+            job_id="lv-1",
+            description="Machine learning internship, January 2026 - June 2026. Python, RAG.",
+            apply_url="https://jobs.lever.co/spotify/abc/apply",
         )
-        ok, reason = adapter.can_submit(plan)
-        self.assertFalse(ok)
-        self.assertIn("email", reason)
-        self.assertEqual(transport.calls, [])
+        with mock.patch("urllib.request.urlopen", autospec=True) as urlopen:
+            urlopen.return_value = _FakeHttpResponse()
+            outcome = applier.process(self._plan(p))
+        self.assertEqual(outcome.action, "review")
+        urlopen.assert_not_called()
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        statuses = [
+            row["status"]
+            for row in self.store.iter_rows(
+                "SELECT status FROM attempts WHERE stable_id = ?", [p.stable_id]
+            )
+        ]
+        self.assertNotIn("submitted", statuses)
+        self.assertNotIn("submitting", statuses)
 
-    def test_non_2xx_is_failed(self):
-        transport = FakeTransport(status=422, body="bad")
-        adapter = AtsAdapter(self.cfg, self.answers, transport=transport)
-        plan = self._plan(
-            posting(source="lever", job_id="zzz", apply_url="https://jobs.lever.co/spotify/zzz/apply")
-        )
-        result = adapter.submit(plan)
-        self.assertEqual(result.status, "failed")
+    def test_unknown_adapter_value_is_rejected(self):
+        self.cfg.apply.adapter = "emial"
+        with self.assertRaises(ValueError):
+            build_adapter(self.cfg, self.answers)
 
-    def test_default_adapter_routes_unsupported_board_to_review(self):
-        cfg = test_config(Path(self.tmp.name))
-        store = Store(":memory:")
-        try:
-            adapter = build_adapter(cfg, self.answers)
-            self.assertEqual(adapter.name, "ats")
-            applier = Applier(store, cfg, adapter, cfg.output.dir)
-            plan = self._plan(posting(source="ashby", job_id="a-1"))
-            outcome = applier.process(plan)
-            self.assertEqual(outcome.action, "review")
-            queued = [r["stable_id"] for r in store.list_review("pending")]
-            self.assertIn(plan.posting.stable_id, queued)
-        finally:
-            store.close()
+    def test_known_adapter_kinds_resolve_safely(self):
+        self.cfg.apply.adapter = "auto"
+        self.assertEqual(build_adapter(self.cfg, self.answers).name, "email")
+        self.cfg.apply.adapter = "email"
+        self.assertEqual(build_adapter(self.cfg, self.answers).name, "email")
+        self.cfg.apply.adapter = "none"
+        self.assertEqual(build_adapter(self.cfg, self.answers).name, "no_public_path")
 
 
 class EmailRecipientTests(unittest.TestCase):

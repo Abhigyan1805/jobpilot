@@ -28,11 +28,12 @@ class FilteringTests(unittest.TestCase):
         )
         self.assertTrue(filter_posting(p, self.cfg.filter).eligible)
 
-    def test_unknown_window_rejected_by_default(self):
+    def test_unknown_window_is_eligible_for_review_not_rejected(self):
         p = posting(title="Data Science Intern", location="Remote - Worldwide", is_remote=True)
         result = filter_posting(p, self.cfg.filter)
-        self.assertFalse(result.eligible)
-        self.assertTrue(any("window" in r for r in result.reject_reasons))
+        self.assertTrue(result.eligible, result.reject_reasons)
+        self.assertEqual(result.window_label, "unknown")
+        self.assertFalse(any("window" in r for r in result.reject_reasons))
 
     def test_unknown_window_allowed_when_configured(self):
         cfg = test_config(filt={"allow_unknown_window": True})

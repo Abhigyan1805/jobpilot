@@ -3,11 +3,14 @@
 Order of guards (all checked before any submission):
 
 1. LinkedIn postings are *never* submitted; they always go to the review queue.
-2. Only strong matches are auto-submitted.
-3. Deduplicate on a stable job id; an attempt is recorded **before** submitting.
-4. Never submit a form with a required field that cannot be answered.
-5. Enforce a configurable daily cap.
-6. Persist a durable record of every attempt and its outcome.
+2. A plan flagged during generation is never auto-submitted.
+3. A posting whose Jan-Jun window is unconfirmed is never auto-submitted unless
+   ``filter.allow_unknown_window`` is set; it goes to the review queue.
+4. Only strong matches are auto-submitted.
+5. Deduplicate on a stable job id; an attempt is recorded **before** submitting.
+6. Never submit a form with a required field that cannot be answered.
+7. Enforce a configurable daily cap.
+8. Persist a durable record of every attempt and its outcome.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from jobpilot.config import Config
 from jobpilot.models import ApplicationPlan
 from jobpilot.review import queue_plan
 from jobpilot.store import Store
+from jobpilot.window import classify_window
 
 
 @dataclass
@@ -54,6 +58,17 @@ class Applier:
             if not plan.review_reason:
                 plan.review_reason = "flagged for review by generation checks"
             return self._to_review(plan, "requires_review")
+
+        # Guard 1c: an unconfirmed Jan-Jun window is never auto-applied unless
+        # the user explicitly loosened it. The posting is still scored and
+        # queued for one-click review.
+        if not self.config.filter.allow_unknown_window:
+            window = classify_window(posting.searchable_text(), self.config.filter)
+            if window.overlaps is None:
+                self._add_reason(
+                    plan, "Jan-Jun window unconfirmed; review before applying"
+                )
+                return self._to_review(plan, "window_review")
 
         # Guard 2: only strong matches auto-apply.
         if plan.match.band != "strong":

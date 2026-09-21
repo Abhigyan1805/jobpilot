@@ -27,5 +27,7 @@ path = "demo_postings.json"
 enabled = false
 
 [apply]
+# With no SMTP configured, every application is prepared as a link-out packet
+# and queued for review; nothing is submitted by this demo.
 adapter = "auto"
 daily_cap = 5

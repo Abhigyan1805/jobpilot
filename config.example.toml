@@ -52,7 +52,7 @@ max_results = 25
 # Hard filters
 # ---------------------------------------------------------------------------
 [filter]
-allow_unknown_window = false     # reject an internship with no stated dates (safe default)
+allow_unknown_window = false     # an internship with no stated dates is scored and queued for review, never auto-applied
 allow_onsite_abroad = false      # onsite roles outside India are rejected
 allow_unknown_location = false   # a posting with no location is rejected
 window_start_month = 1
@@ -84,10 +84,15 @@ seniority_fit = 0.05
 [apply]
 enabled = true
 auto_apply_strong = true
-# "auto" submits strong matches to the Greenhouse/Lever public application
-# endpoints, and routes every other board (or any posting with no stable public
-# endpoint) to the review queue. "email" is an alternate channel; "none" routes
-# everything to review.
+# Channels that submit automatically: email to an explicit, source-supplied
+# application address (requires the SMTP block below). Greenhouse, Lever, Ashby
+# and Workable have no documented, verifiable public application endpoint, so
+# they are never submitted programmatically: each is prepared as a link-out
+# packet (resume, cover letter, direct apply link) and queued for one-click
+# human submission. "auto" (default) uses email wherever an authorized address
+# exists and queues everything else; "email" forces the email channel; "none"
+# routes everything to review. An unknown value is rejected, never treated as a
+# live submission path.
 adapter = "auto"
 daily_cap = 5
 answers_file = "answers.toml"

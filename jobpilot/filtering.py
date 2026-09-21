@@ -115,14 +115,23 @@ def location_check(posting: JobPosting, cfg) -> CheckResult:
 
 
 def window_check(posting: JobPosting, cfg) -> tuple[CheckResult, WindowInfo]:
+    """Judge the posting's window.
+
+    A known out-of-window posting is a hard reject. A posting with no timing
+    signal is never dropped: it passes the filter so it can be scored and shown,
+    but unless ``allow_unknown_window`` is set it is only ever eligible for
+    review, never for auto-apply (enforced at the apply boundary).
+    """
     info = classify_window(posting.searchable_text(), cfg)
     if info.overlaps is True:
         return CheckResult("window", True, f"{info.detail} overlaps Jan-Jun", info.confidence), info
     if info.overlaps is False:
         return CheckResult("window", False, f"{info.detail} does not overlap Jan-Jun", 0.0), info
-    allowed = bool(cfg.allow_unknown_window)
-    detail = f"{info.detail}; {'allowed' if allowed else 'rejected'} by config"
-    return CheckResult("window", allowed, detail, 0.3 if allowed else 0.0), info
+    if cfg.allow_unknown_window:
+        return CheckResult("window", True, f"{info.detail}; unknown window allowed by config", 0.3), info
+    return CheckResult(
+        "window", True, f"{info.detail}; unknown window, eligible for review only", 0.0
+    ), info
 
 
 def filter_posting(posting: JobPosting, cfg) -> FilterResult:

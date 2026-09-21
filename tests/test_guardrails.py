@@ -9,6 +9,10 @@ from jobpilot.models import SubmissionResult
 from jobpilot.store import Store
 from tests.helpers import FakeAdapter, plan_for, posting, test_config
 
+# A description with a confirmed Jan-Jun window, so these guardrail tests
+# exercise the gate under test rather than the unknown-window review gate.
+IN_WINDOW = "Machine learning internship, January 2026 - June 2026. Python, RAG."
+
 
 class RequiredFieldAdapter(SubmissionAdapter):
     name = "form"
@@ -36,7 +40,7 @@ class GuardrailTests(unittest.TestCase):
     def test_missing_required_field_routes_to_review(self):
         adapter = RequiredFieldAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
-        plan = plan_for(posting(job_id="req-1"))
+        plan = plan_for(posting(job_id="req-1", description=IN_WINDOW))
         outcome = applier.process(plan)
         self.assertEqual(outcome.action, "review")
         self.assertEqual(outcome.status, "manual_required")
@@ -57,7 +61,7 @@ class GuardrailTests(unittest.TestCase):
     def test_weak_match_never_auto_submitted(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
-        plan = plan_for(posting(job_id="weak-1"), match=self._weak())
+        plan = plan_for(posting(job_id="weak-1", description=IN_WINDOW), match=self._weak())
         outcome = applier.process(plan)
         self.assertEqual(outcome.status, "shortlist_review")
         self.assertEqual(adapter.calls, [])
@@ -65,7 +69,7 @@ class GuardrailTests(unittest.TestCase):
     def test_dry_run_never_submits(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
-        outcome = applier.process(plan_for(posting(job_id="dry-1")), dry_run=True)
+        outcome = applier.process(plan_for(posting(job_id="dry-1", description=IN_WINDOW)), dry_run=True)
         self.assertEqual(outcome.status, "dry_run")
         self.assertEqual(adapter.calls, [])
 
@@ -81,11 +85,32 @@ class GuardrailTests(unittest.TestCase):
         queued = [r["stable_id"] for r in self.store.list_review("pending")]
         self.assertIn(plan.posting.stable_id, queued)
 
+    def test_unknown_window_strong_match_never_auto_submitted(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        plan = plan_for(posting(job_id="unknown-window-1"))
+        outcome = applier.process(plan)
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "window_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(plan.posting.stable_id))
+        queued = [r["stable_id"] for r in self.store.list_review("pending")]
+        self.assertIn(plan.posting.stable_id, queued)
+
+    def test_unknown_window_allowed_config_may_auto_submit(self):
+        cfg = test_config(Path(self.tmp.name), filt={"allow_unknown_window": True})
+        adapter = FakeAdapter(cfg)
+        applier = Applier(self.store, cfg, adapter, cfg.output.dir)
+        plan = plan_for(posting(job_id="unknown-window-2"))
+        outcome = applier.process(plan)
+        self.assertEqual(outcome.status, "submitted")
+        self.assertEqual(adapter.calls, [plan.posting.stable_id])
+
     def test_auto_apply_strong_disabled_routes_to_review(self):
         cfg = test_config(Path(self.tmp.name), apply={"auto_apply_strong": False})
         adapter = FakeAdapter(cfg)
         applier = Applier(self.store, cfg, adapter, cfg.output.dir)
-        outcome = applier.process(plan_for(posting(job_id="no-auto-1")))
+        outcome = applier.process(plan_for(posting(job_id="no-auto-1", description=IN_WINDOW)))
         self.assertEqual(outcome.action, "review")
         self.assertIn("auto_apply_strong", outcome.reason)
         self.assertEqual(adapter.calls, [])
@@ -94,7 +119,7 @@ class GuardrailTests(unittest.TestCase):
         cfg = test_config(Path(self.tmp.name), apply={"enabled": False})
         adapter = FakeAdapter(cfg)
         applier = Applier(self.store, cfg, adapter, cfg.output.dir)
-        outcome = applier.process(plan_for(posting(job_id="disabled-1")))
+        outcome = applier.process(plan_for(posting(job_id="disabled-1", description=IN_WINDOW)))
         self.assertEqual(outcome.action, "review")
         self.assertEqual(adapter.calls, [])
 

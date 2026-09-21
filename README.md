@@ -28,9 +28,11 @@ employer, date, metric or project.
    content in the exact existing LaTeX style, then compiles it to PDF. Also produces
    a short cover letter per application.
 4. **Applying** - auto-applies only to strong matches, behind mandatory guardrails
-   (dedupe, never-missing-required-field, daily cap, durable record). Strong matches
-   on Greenhouse and Lever go through their public application endpoints; any board
-   with no stable public submission path goes to the review queue.
+   (dedupe, never-missing-required-field, daily cap, durable record). The only
+   automatic channel is email to an explicit, source-supplied application address
+   (with SMTP configured). Greenhouse, Lever, Ashby and Workable expose no
+   documented, verifiable public application endpoint, so they are prepared as
+   link-out packets and routed to the review queue for one-click human submission.
 5. **Tracker and review queue** - a durable SQLite store of every posting seen and a
    queue of uncertain / no-public-path applications with a direct link and the
    generated PDFs, plus a CLI to list, approve and export.
@@ -129,10 +131,14 @@ Each queued item has a packet directory with `resume.pdf`, `cover_letter.pdf`,
   from the profile or `answers.toml`, the application is not submitted.
 - **Configurable daily cap.** Once reached, further strong matches are queued instead.
 - **Durable record** of every attempt and its outcome in SQLite.
-- **No improvised form filling.** Submission happens only through the recognised
-  Greenhouse/Lever public application endpoints or the configured email channel.
-  Where a board has no stable public submission path, the application goes to the
-  review queue.
+- **No improvised endpoints, ever.** A submission is recorded as *submitted* only
+  when it was actually sent through a genuine channel. The only automatic channel
+  is email to an explicit, source-supplied application address (with SMTP
+  configured). Greenhouse, Lever, Ashby and Workable have no documented,
+  verifiable public application endpoint, so they are never POSTed to: each is
+  prepared as a link-out packet and queued for a one-click human submission. An
+  unknown `apply.adapter` value is rejected rather than silently enabling a
+  submission path.
 - **Never invent content.** The no-invention validator fails generation if any number
   or word carrying a fact is not present in the master profile.
 
@@ -232,16 +238,20 @@ toolchain is unavailable).
 
 - The public ATS endpoints are undocumented and may change; adapters are per-source
   and isolated for that reason.
-- Submitting a real application is inherently board-specific. The default
-  `adapter = "auto"` submits strong matches through the public Greenhouse and Lever
-  application endpoints - the same per-posting hosted form a browser uses - with the
-  profile and answers mapped onto each board's required fields. `adapter = "email"`
-  is an alternate channel to a structured application address (optionally narrowed
-  by `apply.submission.email_allowlist`); free-text addresses in a job description
-  are never used. Any other board, or any application missing a required answer, is
-  routed to the review queue - there is deliberately no generic web-form filler.
+- Applying automatically is inherently channel-specific. The default
+  `adapter = "auto"` submits strong matches by email to an explicit, structured
+  application address supplied by the source (optionally narrowed by
+  `apply.submission.email_allowlist`); free-text addresses in a job description are
+  never used, and SMTP must be configured. Greenhouse, Lever, Ashby and Workable do
+  not expose a documented, verifiable public application endpoint, so they are never
+  submitted programmatically: they are prepared as link-out packets (resume, cover
+  letter, direct apply link) and routed to the review queue. `adapter = "none"`
+  routes everything to review. There is deliberately no generic web-form filler, and
+  an unknown adapter value is rejected.
 - The window check is a best-effort inference from posting text; postings rarely
-  state exact dates, so unknown-window internships are rejected by default and can
-  be allowed explicitly with `filter.allow_unknown_window = true`.
+  state exact dates. A posting with no timing signal is discovered, scored and shown,
+  but is only ever eligible for review, never auto-apply. Set
+  `filter.allow_unknown_window = true` to allow auto-apply of unknown-window
+  internships.
 - Discovery only sees boards whose tokens you configure - there is no global job
   search, and there is no public directory mapping companies to board tokens.
