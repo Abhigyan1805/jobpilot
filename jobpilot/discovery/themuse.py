@@ -1,21 +1,30 @@
 """The Muse public jobs adapter (no authentication).
 
-Endpoint verified live:
+Endpoints verified live:
 
     GET https://www.themuse.com/api/public/jobs?page=N&level=Internship&location=India
+    GET https://www.themuse.com/api/public/jobs?page=N&location=India
 
 Returns ``{page, page_count, items_per_page, total, results}`` (20 per page).
 The API is public and free (500 requests/hour unauthenticated, 3,600 with a
 registered key). ``level=Internship`` is a typed filter. ``location=India`` is
 loose - the report observed a US role in the India results - so the shared hard
 location filter validates each hit rather than trusting the parameter.
+
+The typed ``level=Internship`` query is high precision but drops a genuine
+internship the board mis-tags, so it is never the only path. A live probe shows
+the endpoint ignores keyword/q/search/query/text, so the second path is the same
+``location=India`` query without the ``level`` facet; it is merged with the
+typed slice and deduplicated by source job id, and the shared hard filter
+decides. Bounding the extra cost is a per-query page budget (``max_pages`` for
+the typed query, ``broad_max_pages`` for the broader one).
 """
 
 from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from jobpilot.discovery.base import SourceAdapter
+from jobpilot.discovery.base import SourceAdapter, dedupe_postings
 from jobpilot.htmlutil import html_to_text
 from jobpilot.http import FetchError, fetch_json
 from jobpilot.models import JobPosting
@@ -29,11 +38,31 @@ class TheMuseAdapter(SourceAdapter):
     requires_tokens = False
 
     def fetch(self) -> list[JobPosting]:
+        location = str(self.option("location", "India"))
+        level = str(self.option("level", "Internship"))
+
+        typed_params = {"location": location}
+        if level:
+            typed_params["level"] = level
+        broad_params = {"location": location}
+
+        postings, typed_error = self._run_query(typed_params, int(self.option("max_pages", 2)))
+        ok = typed_error == ""
+        errors = [f"typed: {typed_error}"] if typed_error else []
+        if broad_params != typed_params:
+            more, error = self._run_query(broad_params, int(self.option("broad_max_pages", 1)))
+            postings.extend(more)
+            if error:
+                errors.append(f"broad: {error}")
+            else:
+                ok = True
+
+        if not ok and errors:
+            raise FetchError("; ".join(errors))
+        return dedupe_postings(postings)
+
+    def _run_query(self, params: dict[str, str], max_pages: int) -> tuple[list[JobPosting], str]:
         postings: list[JobPosting] = []
-        errors: list[str] = []
-        max_pages = int(self.option("max_pages", 2))
-        params = {"level": str(self.option("level", "Internship")), "location": str(self.option("location", "India"))}
-        page_count = None
         for page in range(1, max_pages + 1):
             query = dict(params)
             query["page"] = page
@@ -41,8 +70,7 @@ class TheMuseAdapter(SourceAdapter):
             try:
                 data = fetch_json(url, timeout=float(self.option("timeout", 20)), limiter=self.limiter)
             except FetchError as exc:
-                errors.append(str(exc))
-                break
+                return postings, f"page {page}: {exc}"
             results = data.get("results") or [] if isinstance(data, dict) else []
             if not results:
                 break
@@ -53,10 +81,7 @@ class TheMuseAdapter(SourceAdapter):
                 break
             if page_count is not None and page >= int(page_count):
                 break
-
-        if not postings and errors:
-            raise FetchError("; ".join(errors))
-        return postings
+        return postings, ""
 
     def _normalise(self, result: dict) -> JobPosting:
         company = result.get("company") or {}

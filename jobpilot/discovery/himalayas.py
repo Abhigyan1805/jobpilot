@@ -3,6 +3,7 @@
 Endpoint verified live on 2026-09-21/22:
 
     GET https://himalayas.app/jobs/api/search?employment_type=Intern&country=India
+    GET https://himalayas.app/jobs/api/search?q=intern&country=India
 
 Returns ``{jobs: [...], totalCount, page, limit}`` and paginates with an integer
 ``page`` parameter (20 per page). The API is free and needs no key. Himalayas'
@@ -10,6 +11,13 @@ terms require a visible link back to himalayas.app and the attribution "data
 sourced from Himalayas"; they also forbid republishing its jobs to
 LinkedIn/Google Jobs/Jooble/Neuvoo. This adapter only reads the feed and records
 the attribution in each posting's raw payload.
+
+The typed ``employment_type=Intern`` query is high precision but drops a genuine
+internship the board mis-tags (e.g. ``employmentType`` of ``Full Time``), so it
+is never the only path: a keyword query (``q=intern`` by default) runs too and
+the two result sets are merged and deduplicated by source job id. The merged
+rows go through the shared hard filter, whose full-time rescue routes a
+mis-tagged but intern-titled posting to human review rather than discarding it.
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
-from jobpilot.discovery.base import SourceAdapter
+from jobpilot.discovery.base import SourceAdapter, dedupe_postings
 from jobpilot.htmlutil import html_to_text
 from jobpilot.http import FetchError, fetch_json
 from jobpilot.models import JobPosting
@@ -38,47 +46,62 @@ class HimalayasAdapter(SourceAdapter):
     requires_tokens = False
 
     def fetch(self) -> list[JobPosting]:
-        postings: list[JobPosting] = []
-        errors: list[str] = []
-        max_pages = int(self.option("max_pages", 1))
-        queries = self.option("queries")
-        if queries is None:
-            single = self.option("query")
-            queries = [single] if single else [None]
+        country = str(self.option("country", "India"))
+        employment_type = str(self.option("employment_type", "Intern"))
+        worldwide = self.option("worldwide")
 
-        base = {
-            "employment_type": str(self.option("employment_type", "Intern")),
-            "country": str(self.option("country", "India")),
-        }
-        if self.option("worldwide"):
-            base["worldwide"] = "true"
+        def base_params() -> dict[str, str]:
+            params = {"country": country}
+            if worldwide:
+                params["worldwide"] = "true"
+            return params
 
-        for query in queries:
-            for page in range(1, max_pages + 1):
-                params = dict(base)
-                params["page"] = page
-                if query:
-                    params["q"] = str(query)
-                url = f"{SEARCH_URL}?{urlencode(params)}"
-                try:
-                    data = fetch_json(url, timeout=float(self.option("timeout", 20)), limiter=self.limiter)
-                except FetchError as exc:
-                    errors.append(f"{query or 'all'}: {exc}")
-                    break
-                jobs = data.get("jobs") or [] if isinstance(data, dict) else []
-                if not jobs:
-                    break
-                for job in jobs:
-                    postings.append(self._normalise(job))
-                total = data.get("totalCount")
-                if len(jobs) < PAGE_SIZE:
-                    break
-                if total is not None and page * PAGE_SIZE >= int(total):
-                    break
+        typed_params = base_params()
+        typed_params["employment_type"] = employment_type
 
-        if not postings and errors:
+        keywords = self.option("queries")
+        if keywords is None:
+            single = self.option("keyword", "intern")
+            keywords = [single] if single else []
+
+        postings, typed_error = self._run_query(typed_params, int(self.option("max_pages", 1)))
+        ok = typed_error == ""
+        errors = [f"typed: {typed_error}"] if typed_error else []
+        for keyword in keywords:
+            params = base_params()
+            params["q"] = str(keyword)
+            more, error = self._run_query(params, int(self.option("keyword_max_pages", 1)))
+            postings.extend(more)
+            if error:
+                errors.append(f"{keyword}: {error}")
+            else:
+                ok = True
+
+        if not ok and errors:
             raise FetchError("; ".join(errors))
-        return postings
+        return dedupe_postings(postings)
+
+    def _run_query(self, params: dict[str, str], max_pages: int) -> tuple[list[JobPosting], str]:
+        postings: list[JobPosting] = []
+        for page in range(1, max_pages + 1):
+            query = dict(params)
+            query["page"] = page
+            url = f"{SEARCH_URL}?{urlencode(query)}"
+            try:
+                data = fetch_json(url, timeout=float(self.option("timeout", 20)), limiter=self.limiter)
+            except FetchError as exc:
+                return postings, f"page {page}: {exc}"
+            jobs = data.get("jobs") or [] if isinstance(data, dict) else []
+            if not jobs:
+                break
+            for job in jobs:
+                postings.append(self._normalise(job))
+            total = data.get("totalCount")
+            if len(jobs) < PAGE_SIZE:
+                break
+            if total is not None and page * PAGE_SIZE >= int(total):
+                break
+        return postings, ""
 
     def _normalise(self, job: dict) -> JobPosting:
         restrictions = [str(x) for x in (job.get("locationRestrictions") or []) if x]

@@ -243,7 +243,11 @@ employment-type metadata, `level` on The Muse, `employment_type` on Himalayas),
 and a title alone is never used to invent it. Adapters never drop a posting on
 its typed value: every posting reaches the shared hard filter, which keeps a
 genuine intern that a board tagged with a generic value like `FullTime` and
-routes it to human review instead of discarding it.
+routes it to human review instead of discarding it. The search adapters
+(Himalayas, The Muse) may use a typed query as a high-precision slice, but it is
+never the only path: a broader query runs alongside it and the two result sets
+are merged and deduplicated by source job id, so a mis-tagged posting the typed
+facet would have excluded is still discovered and filtered.
 
 | Source | Endpoint | Limitations |
 | --- | --- | --- |
@@ -251,10 +255,10 @@ routes it to human review instead of discarding it.
 | **Lever** | `api.lever.co/v0/postings/{token}?mode=json` | Documented postings endpoint; carries each job's typed `commitment` for the shared filter and never drops on it, so a genuine intern a board tags `Fulltime` still reaches review. Only boards whose token you configure. |
 | **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; carries each job's typed `employmentType` for the shared filter; never drops on it. Only configured tokens. |
 | **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Carries each row's typed `employment_type` for the shared filter; never drops on it. |
-| **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` | Free, no key; integer `page` pagination (20/page). Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
+| **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` plus a `q=intern` keyword pass | Free, no key; integer `page` pagination (20/page). The typed `employment_type=Intern` slice is a high-precision path, not the only one: a `q=intern` keyword query is merged in and deduplicated by guid so a mis-tagged intern is still discovered. Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
 | **Unstop** | `unstop.com/api/public/opportunity/search-result?opportunity=internships&page=N` | India-native live internship feed (~10,000 rows); its `robots.txt` explicitly allows `/api/public/*`. 10/page. Typed `start_date`/`end_date` are mapped into the window check; a lone date is left as "unknown window" (review-only). |
 | **Workable** (global search) | `jobs.workable.com/api/v1/jobs?query=intern&location=India` | **Undocumented** cross-company search; paginates with an opaque `pageToken`. `robots.txt` sets `ai-train=no` (data must not be used for model training). Its `employmentType` is unreliable, so it relies on Workable's own server-side `query=intern` search. |
-| **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
+| **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` plus a `location=India` pass without `level` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. That typed slice is not the only path: the API ignores keyword parameters, so a broader `location=India` query without the level facet is merged in and deduplicated by id. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
 | **LinkedIn** (optional reader, disabled by default) | public guest job-search HTML | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** An off-by-default, captain-authorized exception: link-out is the default LinkedIn path. Never logs in, never authenticates, never applies, low rate, degrades gracefully. Never auto-submitted. |
 
 ### Link-out sources (manual only, never scraped)

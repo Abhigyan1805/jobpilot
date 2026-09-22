@@ -66,7 +66,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_fetch_paginates_with_page_param(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=3), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=3, queries=[]), cfg)
         pages = {
             1: [{"guid": f"g{i}", "title": "Intern", "employmentType": "Intern"} for i in range(20)],
             2: [{"guid": "g20", "title": "Intern", "employmentType": "Intern"}],
@@ -83,6 +83,54 @@ class HimalayasTests(unittest.TestCase):
         self.assertIn("employment_type=Intern", fetch.call_args_list[0].args[0])
         self.assertIn("country=India", fetch.call_args_list[0].args[0])
 
+    def test_fetch_runs_typed_and_keyword_queries_and_merges(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
+        keyword = {"guid": "kw-1", "title": "Machine Learning Intern", "employmentType": "Full Time"}
+        urls: list[str] = []
+
+        def fake(url, **kwargs):
+            urls.append(url)
+            if "employment_type=Intern" in url:
+                return {"totalCount": 1, "jobs": [typed]}
+            if "q=intern" in url:
+                return {"totalCount": 1, "jobs": [keyword]}
+            return {"totalCount": 0, "jobs": []}
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            postings = adapter.fetch()
+        self.assertEqual([p.job_id for p in postings], ["typed-1", "kw-1"])
+        self.assertTrue(any("employment_type=Intern" in u for u in urls))
+        self.assertTrue(any("q=intern" in u and "employment_type" not in u for u in urls))
+
+    def test_fetch_deduplicates_rows_returned_by_both_queries(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        row = {"guid": "same-1", "title": "ML Intern", "employmentType": "Intern"}
+
+        def fake(url, **kwargs):
+            return {"totalCount": 1, "jobs": [row]}
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            postings = adapter.fetch()
+        self.assertEqual([p.job_id for p in postings], ["same-1"])
+
+    def test_secondary_query_failure_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
+
+        def fake(url, **kwargs):
+            if "employment_type=Intern" in url:
+                return {"totalCount": 1, "jobs": [typed]}
+            raise FetchError("keyword endpoint outage")
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], ["typed-1"])
+
     def test_fetch_safe_isolates_a_source_failure(self):
         cfg = test_config()
         adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
@@ -90,6 +138,43 @@ class HimalayasTests(unittest.TestCase):
             outcome = adapter.fetch_safe()
         self.assertFalse(outcome.ok)
         self.assertIn("board outage", outcome.error)
+
+    def test_fulltime_tagged_ml_intern_is_discovered_and_routes_to_review(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        mis_tagged = {
+            "guid": "ml-1",
+            "title": "Machine Learning Intern",
+            "companyName": "Aurora",
+            "employmentType": "Full Time",
+            "locationRestrictions": ["India"],
+            "description": "<p>Machine learning internship. Python, RAG, LLMs.</p>",
+            "applicationLink": "https://himalayas.app/jobs/ml-1",
+        }
+        urls: list[str] = []
+
+        def fake(url, **kwargs):
+            urls.append(url)
+            if "employment_type=Intern" in url:
+                return {"totalCount": 0, "jobs": []}
+            return {"totalCount": 1, "jobs": [mis_tagged]}
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            postings = adapter.fetch()
+        self.assertTrue(any("q=intern" in u and "employment_type" not in u for u in urls))
+        found = next(p for p in postings if p.job_id == "ml-1")
+        self.assertEqual(found.employment_type, "Full Time")
+        self.assertTrue(any("ambiguous" in r for r in review_only_reasons(found, cfg.filter)))
+
+        store = Store(":memory:")
+        try:
+            applier = Applier(store, cfg, FakeAdapter(cfg), cfg.output.dir)
+            outcome = applier.process(plan_for(found))
+            submitted = store.has_submitted(found.stable_id)
+        finally:
+            store.close()
+        self.assertEqual(outcome.action, "review")
+        self.assertFalse(submitted)
 
 
 class UnstopTests(unittest.TestCase):
@@ -211,10 +296,50 @@ class TheMuseTests(unittest.TestCase):
 
         with mock.patch("jobpilot.discovery.themuse.fetch_json", side_effect=fake) as fetch:
             postings = adapter.fetch()
-        # one short page (< PAGE_SIZE) stops pagination after the first call.
+        # the typed page has < PAGE_SIZE rows so it stops, and the broader query
+        # returns the same row; it is deduplicated by source job id.
         self.assertEqual(len(postings), 1)
-        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(fetch.call_count, 2)
         self.assertIn("level=Internship", fetch.call_args_list[0].args[0])
+        self.assertNotIn("level", fetch.call_args_list[1].args[0])
+
+    def test_fulltime_tagged_ml_intern_is_discovered_and_routes_to_review(self):
+        cfg = test_config()
+        adapter = TheMuseAdapter(_source(cfg, "themuse", max_pages=1), cfg)
+        mis_tagged = {
+            "id": 99001,
+            "name": "Machine Learning Intern",
+            "company": {"name": "Aurora"},
+            "locations": [{"name": "Bengaluru, India"}],
+            "levels": [{"name": "Full Time"}],
+            "refs": {"landing_page": "https://www.themuse.com/jobs/aurora/ml-intern"},
+            "publication_date": "2026-01-02T00:00:00Z",
+            "contents": "<p>Machine learning internship. Python, RAG, LLMs.</p>",
+        }
+        urls: list[str] = []
+
+        def fake(url, **kwargs):
+            urls.append(url)
+            if "level=Internship" in url:
+                return {"page": 1, "page_count": 1, "results": []}
+            return {"page": 1, "page_count": 1, "results": [mis_tagged]}
+
+        with mock.patch("jobpilot.discovery.themuse.fetch_json", side_effect=fake):
+            postings = adapter.fetch()
+        self.assertTrue(any("location=India" in u and "level" not in u for u in urls))
+        found = next(p for p in postings if p.job_id == "99001")
+        self.assertEqual(found.employment_type, "Full Time")
+        self.assertTrue(any("ambiguous" in r for r in review_only_reasons(found, cfg.filter)))
+
+        store = Store(":memory:")
+        try:
+            applier = Applier(store, cfg, FakeAdapter(cfg), cfg.output.dir)
+            outcome = applier.process(plan_for(found))
+            submitted = store.has_submitted(found.stable_id)
+        finally:
+            store.close()
+        self.assertEqual(outcome.action, "review")
+        self.assertFalse(submitted)
 
 
 class AdapterCoverageTests(unittest.TestCase):
