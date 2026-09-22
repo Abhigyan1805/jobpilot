@@ -41,6 +41,13 @@ def _iso(timestamp) -> str:
         return str(timestamp or "")
 
 
+def _as_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class HimalayasAdapter(SourceAdapter):
     name = "himalayas"
     requires_tokens = False
@@ -59,21 +66,23 @@ class HimalayasAdapter(SourceAdapter):
         typed_params = base_params()
         typed_params["employment_type"] = employment_type
 
-        keywords = self.option("queries")
-        if keywords is None:
-            single = self.option("keyword", "intern")
-            keywords = [single] if single else []
+        keyword = self.option("keyword", "intern")
+        keywords = [str(keyword)] if keyword else []
 
         postings, typed_error = self._run_query(typed_params, int(self.option("max_pages", 1)))
         ok = typed_error == ""
         errors = [f"typed: {typed_error}"] if typed_error else []
-        for keyword in keywords:
+        for term in keywords:
             params = base_params()
-            params["q"] = str(keyword)
-            more, error = self._run_query(params, int(self.option("keyword_max_pages", 1)))
+            params["q"] = str(term)
+            try:
+                more, error = self._run_query(params, int(self.option("keyword_max_pages", 1)))
+            except Exception as exc:  # noqa: BLE001 - a secondary query must never fail the adapter
+                errors.append(f"{term}: {type(exc).__name__}: {exc}")
+                continue
             postings.extend(more)
             if error:
-                errors.append(f"{keyword}: {error}")
+                errors.append(f"{term}: {error}")
             else:
                 ok = True
 
@@ -96,10 +105,10 @@ class HimalayasAdapter(SourceAdapter):
                 break
             for job in jobs:
                 postings.append(self._normalise(job))
-            total = data.get("totalCount")
             if len(jobs) < PAGE_SIZE:
                 break
-            if total is not None and page * PAGE_SIZE >= int(total):
+            total = _as_int(data.get("totalCount"))
+            if total is not None and page * PAGE_SIZE >= total:
                 break
         return postings, ""
 

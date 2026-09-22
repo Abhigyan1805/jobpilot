@@ -33,6 +33,13 @@ SEARCH_URL = "https://www.themuse.com/api/public/jobs"
 PAGE_SIZE = 20
 
 
+def _as_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class TheMuseAdapter(SourceAdapter):
     name = "themuse"
     requires_tokens = False
@@ -50,12 +57,16 @@ class TheMuseAdapter(SourceAdapter):
         ok = typed_error == ""
         errors = [f"typed: {typed_error}"] if typed_error else []
         if broad_params != typed_params:
-            more, error = self._run_query(broad_params, int(self.option("broad_max_pages", 1)))
-            postings.extend(more)
-            if error:
-                errors.append(f"broad: {error}")
+            try:
+                more, error = self._run_query(broad_params, int(self.option("broad_max_pages", 1)))
+            except Exception as exc:  # noqa: BLE001 - a secondary query must never fail the adapter
+                errors.append(f"broad: {type(exc).__name__}: {exc}")
             else:
-                ok = True
+                postings.extend(more)
+                if error:
+                    errors.append(f"broad: {error}")
+                else:
+                    ok = True
 
         if not ok and errors:
             raise FetchError("; ".join(errors))
@@ -76,10 +87,10 @@ class TheMuseAdapter(SourceAdapter):
                 break
             for result in results:
                 postings.append(self._normalise(result))
-            page_count = data.get("page_count")
             if len(results) < PAGE_SIZE:
                 break
-            if page_count is not None and page >= int(page_count):
+            page_count = _as_int(data.get("page_count"))
+            if page_count is not None and page >= page_count:
                 break
         return postings, ""
 

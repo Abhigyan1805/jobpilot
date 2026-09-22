@@ -86,13 +86,23 @@ WINDOW_CONTEXT = {
     "summer", "winter", "spring", "autumn", "fall", "monsoon",
     "window", "period", "placement", *MONTHS,
 }
-# Explicit deadline/application phrasing vetoes an ISO pair: an application
-# range is not the internship's window even when timing words appear nearby.
-DEADLINE_CONTEXT = {
-    "deadline", "deadlines", "apply", "applies", "applying", "application",
-    "applications", "close", "closes", "closed", "closing", "accepted",
-    "accepting", "submit", "submission",
-}
+# Explicit deadline/application phrases veto an ISO pair: an application range
+# or deadline is not the internship's window even when timing words appear
+# nearby. The phrase must sit in the pair's own clause, so deadline prose in a
+# following sentence cannot demote a genuine typed window.
+DEADLINE_PHRASES = (
+    "apply by",
+    "application window",
+    "applications close",
+    "application closes",
+    "applications accepted",
+    "application accepted",
+    "applications are invited",
+    "deadline",
+)
+# Clause terminators bound how far a deadline phrase or timing word reaches
+# around a date pair.
+_CLAUSE_BREAKS = ".!?\n;"
 
 
 def _season_has_context(text: str, match: re.Match, season: str) -> bool:
@@ -107,20 +117,35 @@ def _season_has_context(text: str, match: re.Match, season: str) -> bool:
     return False
 
 
+def _clause_before(text: str, pos: int) -> str:
+    cut = max(text.rfind(ch, 0, pos) for ch in _CLAUSE_BREAKS)
+    return text[cut + 1: pos]
+
+
+def _clause_after(text: str, pos: int) -> str:
+    stops = [text.find(ch, pos) for ch in _CLAUSE_BREAKS]
+    stops = [stop for stop in stops if stop != -1]
+    return text[pos: min(stops)] if stops else text[pos:]
+
+
 def _range_has_context(text: str, match: re.Match) -> bool:
     """Whether an ISO date pair is the posting's own window.
 
-    Only a genuine timing word in the surrounding description establishes a
-    window, and explicit deadline/application phrasing vetoes the pair, because
-    an application or deadline range is not the internship's window. ``text`` is
-    the posting's own prose (the description), so an adjacent concatenated field
-    such as ``employment_type`` can never supply the context.
+    Only a genuine timing word in the pair's own clause establishes a window,
+    and an explicit deadline/application phrase in that same clause vetoes it,
+    because an application or deadline range is not the internship's window.
+    ``text`` is the posting's own prose (the description), so an adjacent
+    concatenated field such as ``employment_type`` can never supply the context.
     """
-    before = re.findall(r"[A-Za-z0-9-]+", text[: match.start()])
-    after = re.findall(r"[A-Za-z0-9-]+", text[match.end():])
-    if any(token.lower() in DEADLINE_CONTEXT for token in (*before[-4:], *after[:3])):
+    before = _clause_before(text, match.start())
+    after = _clause_after(text, match.end())
+    label = f"{before} {after}".lower()
+    if any(re.search(rf"\b{re.escape(phrase)}\b", label) for phrase in DEADLINE_PHRASES):
         return False
-    nearby = [token.lower() for token in (*before[-2:], *after[:2])]
+    nearby = [
+        token.lower()
+        for token in (*re.findall(r"[A-Za-z0-9-]+", before)[-2:], *re.findall(r"[A-Za-z0-9-]+", after)[:2])
+    ]
     return any(token in WINDOW_CONTEXT for token in nearby)
 
 

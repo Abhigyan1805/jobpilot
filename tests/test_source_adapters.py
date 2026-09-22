@@ -22,6 +22,7 @@ from jobpilot.discovery.workable_global import WorkableGlobalAdapter
 from jobpilot.filtering import filter_posting, review_only_reasons
 from jobpilot.http import FetchError
 from jobpilot.store import Store
+from jobpilot.window import classify_window
 from tests.helpers import FakeAdapter, plan_for, test_config
 
 
@@ -67,7 +68,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_fetch_paginates_with_page_param(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=3, queries=[]), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=3, keyword=""), cfg)
         pages = {
             1: [{"guid": f"g{i}", "title": "Intern", "employmentType": "Intern"} for i in range(20)],
             2: [{"guid": "g20", "title": "Intern", "employmentType": "Intern"}],
@@ -104,6 +105,55 @@ class HimalayasTests(unittest.TestCase):
         self.assertEqual([p.job_id for p in postings], ["typed-1", "kw-1"])
         self.assertTrue(any("employment_type=Intern" in u for u in urls))
         self.assertTrue(any("q=intern" in u and "employment_type" not in u for u in urls))
+
+    def test_scalar_keyword_issues_one_request_not_one_per_character(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1, keyword="ml intern"), cfg)
+        keyword_urls: list[str] = []
+
+        def fake(url, **kwargs):
+            if "employment_type=Intern" not in url:
+                keyword_urls.append(url)
+            return {"totalCount": 0, "jobs": []}
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            adapter.fetch()
+        self.assertEqual(len(keyword_urls), 1)
+        self.assertIn("q=ml+intern", keyword_urls[0])
+
+    def test_secondary_query_parse_error_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
+        full_page = [
+            {"guid": f"kw-{i}", "title": "ML Intern", "employmentType": "Full Time"}
+            for i in range(20)
+        ]
+
+        def fake(url, **kwargs):
+            if "employment_type=Intern" in url:
+                return {"totalCount": 1, "jobs": [typed]}
+            return {"totalCount": "unknown", "jobs": full_page}
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+        self.assertTrue(outcome.ok)
+        self.assertIn("typed-1", [p.job_id for p in outcome.postings])
+
+    def test_secondary_query_non_fetch_error_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
+
+        def fake(url, **kwargs):
+            if "employment_type=Intern" in url:
+                return {"totalCount": 1, "jobs": [typed]}
+            raise ValueError("malformed keyword payload")
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], ["typed-1"])
 
     def test_fetch_deduplicates_rows_returned_by_both_queries(self):
         cfg = test_config()
@@ -217,6 +267,26 @@ class UnstopTests(unittest.TestCase):
         self.assertEqual(result.window_label, "Jan-Jun 2026")
         self.assertEqual(result.window_confidence, 1.0)
 
+    def test_typed_window_survives_deadline_prose_in_the_next_segment(self):
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop"), cfg)
+        row = {
+            **dict(self.ROW),
+            "workfunction": [],
+            "details": "<p>Applications are invited from eligible candidates.</p>",
+        }
+        posting = adapter._normalise(row)
+        self.assertIn("Applications are invited", posting.description)
+
+        info = classify_window(posting.searchable_text(), cfg.filter, prose=posting.description)
+        self.assertIs(info.overlaps, True)
+        self.assertEqual(info.confidence, 1.0)
+
+        result = filter_posting(posting, cfg.filter)
+        self.assertTrue(result.eligible, result.reject_text())
+        self.assertEqual(result.window_label, "Jan-Jun 2026")
+        self.assertEqual(result.window_confidence, 1.0)
+
     def test_fetch_skips_finished_and_stops_on_last_page(self):
         cfg = test_config()
         adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=5), cfg)
@@ -312,6 +382,35 @@ class TheMuseTests(unittest.TestCase):
         self.assertEqual(fetch.call_count, 2)
         self.assertIn("level=Internship", fetch.call_args_list[0].args[0])
         self.assertNotIn("level", fetch.call_args_list[1].args[0])
+
+    def test_broad_query_parse_error_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        adapter = TheMuseAdapter(_source(cfg, "themuse", max_pages=1), cfg)
+        broad = [{**self.RESULT, "id": 1000 + i} for i in range(20)]
+
+        def fake(url, **kwargs):
+            if "level=Internship" in url:
+                return {"page": 1, "page_count": 1, "results": [dict(self.RESULT)]}
+            return {"page": 1, "page_count": "lots", "results": broad}
+
+        with mock.patch("jobpilot.discovery.themuse.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+        self.assertTrue(outcome.ok)
+        self.assertIn("18552328", [p.job_id for p in outcome.postings])
+
+    def test_broad_query_non_fetch_error_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        adapter = TheMuseAdapter(_source(cfg, "themuse", max_pages=1), cfg)
+
+        def fake(url, **kwargs):
+            if "level=Internship" in url:
+                return {"page": 1, "page_count": 1, "results": [dict(self.RESULT)]}
+            raise ValueError("malformed broad payload")
+
+        with mock.patch("jobpilot.discovery.themuse.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], ["18552328"])
 
     def test_fulltime_tagged_ml_intern_is_discovered_and_routes_to_review(self):
         cfg = test_config()
