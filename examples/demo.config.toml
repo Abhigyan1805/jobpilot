@@ -1,0 +1,33 @@
+# Offline demo config: uses the local postings file instead of live boards so
+# the whole pipeline can be verified with no network. See README.
+[profile]
+path = "/mnt/d/LaTeX/resume/PROFILE.md"
+style_template = "/mnt/d/LaTeX/resume/Abhigyan_Resume_AI_ML.tex"
+pdflatex = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdflatex.exe"
+pdftotext = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdftotext.exe"
+
+[output]
+dir = "out/demo"
+database = "out/demo/jobpilot.db"
+
+[sources.greenhouse]
+enabled = false
+[sources.lever]
+enabled = false
+[sources.ashby]
+enabled = false
+[sources.workable]
+enabled = false
+
+[sources.local]
+enabled = true
+path = "demo_postings.json"
+
+[linkedin]
+enabled = false
+
+[apply]
+# With no SMTP configured, every application is prepared as a link-out packet
+# and queued for review; nothing is submitted by this demo.
+adapter = "auto"
+daily_cap = 5

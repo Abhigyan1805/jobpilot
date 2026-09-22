@@ -11,3 +11,9 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+
+# Local, machine-specific configuration and personal answers (never commit).
+config.toml
+answers.toml
+out_test/
+examples/out/

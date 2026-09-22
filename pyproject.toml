@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jobpilot"
+version = "0.1.0"
+description = "Config-driven internship discovery, tailored resume generation and guarded auto-application."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+jobpilot = "jobpilot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jobpilot*"]

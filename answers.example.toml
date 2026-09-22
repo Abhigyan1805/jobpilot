@@ -1,0 +1,12 @@
+# Answers for application form fields.
+# Copy to answers.toml and fill in. answers.toml is git-ignored; never commit it.
+# Fields the pipeline cannot resolve from your profile or this file are treated
+# as missing, and a form with a missing required field is never submitted.
+
+[answers]
+work_authorization = "Authorized to work in India"
+requires_sponsorship = "No"
+notice_period = "Immediate"
+graduation_year = "2027"
+preferred_start = "January 2027"
+preferred_end = "June 2027"
