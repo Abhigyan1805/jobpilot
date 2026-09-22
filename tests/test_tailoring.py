@@ -1,13 +1,19 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from jobpilot.matching import Matcher
 from jobpilot.profile import load_profile
 from jobpilot.resume.compiler import compile_tex
 from jobpilot.resume.generator import ResumeGenerator
-from jobpilot.resume.parseability import check_parseability, extract_pdf_text
+from jobpilot.resume.parseability import (
+    TextExtractionError,
+    check_parseability,
+    extract_pdf_text,
+)
 from tests.helpers import posting, test_config
 
 REAL_PROFILE = "/mnt/d/LaTeX/resume/PROFILE.md"
@@ -16,6 +22,42 @@ REAL_ENGINE = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdflatex.exe"
 REAL_PDFTOTEXT = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdftotext.exe"
 
 _HAS_TOOLCHAIN = all(os.path.exists(p) for p in (REAL_PROFILE, REAL_STYLE, REAL_ENGINE, REAL_PDFTOTEXT))
+
+
+class ExtractPdfTextInvocationTests(unittest.TestCase):
+    """The extractor must run with cwd + a relative filename and read stdout.
+
+    An absolute Linux path passed as an argument is not translated for a Windows
+    ``pdftotext.exe`` launched from WSL, so the extractor cannot open it. This
+    guards the compiler-style invocation without needing the real toolchain.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.pdf = Path(self.tmp.name) / "resume.pdf"
+        self.pdf.write_bytes(b"%PDF-1.4 dummy")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_invokes_relative_filename_from_pdf_directory_and_reads_stdout(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Education Experience Projects\n", stderr=""
+        )
+        with mock.patch("jobpilot.resume.parseability.subprocess.run", return_value=completed) as run:
+            text = extract_pdf_text(str(self.pdf), "pdftotext")
+
+        self.assertEqual(text, "Education Experience Projects\n")
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], ["pdftotext", "-layout", "resume.pdf", "-"])
+        self.assertEqual(kwargs["cwd"], str(self.pdf.parent))
+        self.assertNotIn(str(self.pdf), args[0])
+
+    def test_raises_when_extractor_produces_no_output(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
+        with mock.patch("jobpilot.resume.parseability.subprocess.run", return_value=completed):
+            with self.assertRaises(TextExtractionError):
+                extract_pdf_text(str(self.pdf), "pdftotext")
 
 
 @unittest.skipUnless(_HAS_TOOLCHAIN, "real LaTeX toolchain not available")

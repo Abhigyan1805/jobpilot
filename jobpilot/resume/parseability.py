@@ -10,7 +10,6 @@ target keywords are present as machine-readable text.
 from __future__ import annotations
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 from jobpilot.htmlutil import clean_whitespace
@@ -21,30 +20,36 @@ class TextExtractionError(RuntimeError):
 
 
 def extract_pdf_text(pdf_path: str, extractor: str, *, timeout: int = 60) -> str:
-    """Extract text via pdftotext (the extractor shipped with the LaTeX engine)."""
+    """Extract text via pdftotext (the extractor shipped with the LaTeX engine).
+
+    The extractor is invoked from the PDF's directory with a relative filename
+    and writes to stdout, mirroring :func:`jobpilot.resume.compiler.compile_tex`.
+    That matters when the engine is a Windows ``pdftotext.exe`` launched from
+    WSL: an absolute Linux path passed as an argument is not translated and the
+    Windows process cannot open it, whereas a relative filename resolved against
+    the working directory is. Writing to stdout (``-``) avoids needing a second
+    path that a Windows process also could not reach.
+    """
     pdf = Path(pdf_path)
     if not pdf.exists():
         raise TextExtractionError(f"pdf not found: {pdf_path}")
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "out.txt"
-        try:
-            proc = subprocess.run(
-                [extractor, "-layout", str(pdf), str(out)],
-                capture_output=True,
-                timeout=timeout,
-                text=True,
-            )
-        except FileNotFoundError as exc:
-            raise TextExtractionError(f"text extractor not found: {extractor}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise TextExtractionError(f"text extraction timed out after {timeout}s") from exc
-        if proc.returncode != 0 and not out.exists():
-            raise TextExtractionError(
-                f"text extraction failed: {(proc.stderr or proc.stdout or '')[-500:]}"
-            )
-        if not out.exists():
-            raise TextExtractionError("text extractor produced no output")
-        return out.read_text(encoding="utf-8", errors="replace")
+    try:
+        proc = subprocess.run(
+            [extractor, "-layout", pdf.name, "-"],
+            cwd=str(pdf.parent),
+            capture_output=True,
+            timeout=timeout,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise TextExtractionError(f"text extractor not found: {extractor}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise TextExtractionError(f"text extraction timed out after {timeout}s") from exc
+    if not proc.stdout:
+        raise TextExtractionError(
+            f"text extraction failed: {(proc.stderr or proc.stdout or '')[-500:]}"
+        )
+    return proc.stdout
 
 
 def check_parseability(
