@@ -139,7 +139,7 @@ class ManualReviewRoutingTests(unittest.TestCase):
 class WindowIsoRangeTests(unittest.TestCase):
     def test_iso_start_end_pair_is_an_explicit_in_window_range(self):
         cfg = test_config()
-        info = classify_window("Internship 2026-01-10 - 2026-06-30", cfg.filter)
+        info = classify_window("Internship window 2026-01-10 - 2026-06-30", cfg.filter)
         self.assertIs(info.overlaps, True)
         self.assertEqual(info.confidence, 1.0)
 
@@ -154,6 +154,35 @@ class WindowIsoRangeTests(unittest.TestCase):
             "Machine Learning Intern. Applications accepted 2025-08-01 through 2025-11-30.",
             cfg.filter,
         )
+        self.assertIsNone(info.overlaps)
+
+    def test_bare_employment_type_token_cannot_supply_iso_context(self):
+        cfg = test_config()
+        p = posting(
+            job_id="employment-type-context-1",
+            title="Machine Learning Intern",
+            employment_type="Internship",
+            description="Deadline: 2025-09-01 through 2025-11-30.",
+        )
+        info = classify_window(p.searchable_text(), cfg.filter, prose=p.description)
+        self.assertIsNone(info.overlaps)
+        result = filter_posting(p, cfg.filter)
+        self.assertTrue(result.eligible, result.reject_text())
+
+    def test_deadline_iso_range_overlapping_the_target_window_is_not_verified(self):
+        cfg = test_config()
+        p = posting(
+            job_id="employment-type-context-2",
+            title="Machine Learning Intern",
+            employment_type="Internship",
+            description="Deadline: 2025-02-01 through 2025-03-15.",
+        )
+        info = classify_window(p.searchable_text(), cfg.filter, prose=p.description)
+        self.assertIsNone(info.overlaps)
+
+    def test_application_window_phrase_is_not_read_as_the_internship_window(self):
+        cfg = test_config()
+        info = classify_window("The application window is 2026-01-10 - 2026-06-30.", cfg.filter)
         self.assertIsNone(info.overlaps)
 
     def test_deadline_iso_range_does_not_reject_an_in_window_internship(self):

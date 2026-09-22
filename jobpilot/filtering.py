@@ -258,7 +258,7 @@ def window_check(posting: JobPosting, cfg) -> tuple[CheckResult, WindowInfo]:
     but unless ``allow_unknown_window`` is set it is only ever eligible for
     review, never for auto-apply (enforced at the apply boundary).
     """
-    info = classify_window(posting.searchable_text(), cfg)
+    info = classify_window(posting.searchable_text(), cfg, prose=posting.description)
     if info.overlaps is True:
         return CheckResult("window", True, f"{info.detail} overlaps Jan-Jun", info.confidence), info
     if info.overlaps is False:

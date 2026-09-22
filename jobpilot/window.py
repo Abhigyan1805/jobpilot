@@ -76,6 +76,23 @@ SPRING_TECH_SUFFIXES = {
     "boot", "cloud", "framework", "security", "mvc", "batch", "webflux",
     "jpa", "graphql", "actuator", "data",
 }
+# Words that name a timing window. An ISO date pair only counts when one of
+# these sits next to it *in the description itself*; a bare "Internship" token
+# leaked in from a concatenated field is not a timing word.
+WINDOW_CONTEXT = {
+    "start", "starts", "starting", "begin", "begins", "beginning",
+    "commence", "commences", "commencing", "duration", "week", "weeks",
+    "month", "months", "term", "terms", "semester", "semesters",
+    "summer", "winter", "spring", "autumn", "fall", "monsoon",
+    "window", "period", "placement", *MONTHS,
+}
+# Explicit deadline/application phrasing vetoes an ISO pair: an application
+# range is not the internship's window even when timing words appear nearby.
+DEADLINE_CONTEXT = {
+    "deadline", "deadlines", "apply", "applies", "applying", "application",
+    "applications", "close", "closes", "closed", "closing", "accepted",
+    "accepting", "submit", "submission",
+}
 
 
 def _season_has_context(text: str, match: re.Match, season: str) -> bool:
@@ -91,14 +108,20 @@ def _season_has_context(text: str, match: re.Match, season: str) -> bool:
 
 
 def _range_has_context(text: str, match: re.Match) -> bool:
-    """Whether an ISO date pair sits next to internship/term/window context.
+    """Whether an ISO date pair is the posting's own window.
 
-    An arbitrary date pair in prose (an application or deadline range) is not
-    the internship's own window, so it must not be read as one.
+    Only a genuine timing word in the surrounding description establishes a
+    window, and explicit deadline/application phrasing vetoes the pair, because
+    an application or deadline range is not the internship's window. ``text`` is
+    the posting's own prose (the description), so an adjacent concatenated field
+    such as ``employment_type`` can never supply the context.
     """
-    before = re.findall(r"[A-Za-z0-9-]+", text[: match.start()])[-2:]
-    after = re.findall(r"[A-Za-z0-9-]+", text[match.end():])[:2]
-    return any(token.lower() in SEASON_CONTEXT for token in (*before, *after))
+    before = re.findall(r"[A-Za-z0-9-]+", text[: match.start()])
+    after = re.findall(r"[A-Za-z0-9-]+", text[match.end():])
+    if any(token.lower() in DEADLINE_CONTEXT for token in (*before[-4:], *after[:3])):
+        return False
+    nearby = [token.lower() for token in (*before[-2:], *after[:2])]
+    return any(token in WINDOW_CONTEXT for token in nearby)
 
 
 @dataclass
@@ -126,10 +149,18 @@ def _label(start: int, end: int, year: str = "") -> str:
     return f"{name(start)}-{name(end)}{(' ' + year) if year else ''}"
 
 
-def classify_window(text: str, cfg) -> WindowInfo:
+def classify_window(text: str, cfg, *, prose: str | None = None) -> WindowInfo:
+    """Classify a posting's timing.
+
+    ``text`` is the searchable text scanned for every signal. ``prose`` is the
+    posting's own description, used for ISO date pairs so that context cannot
+    leak in from a concatenated field such as the employment type; when omitted
+    (direct callers with a plain string) ``text`` stands in for it.
+    """
     if not text:
         return WindowInfo("unknown", 0.0, None, "no text to inspect")
     window = _window_months(cfg)
+    iso_text = text if prose is None else prose
 
     # 1. Explicit month-name ranges (highest confidence).
     for m in RANGE_RE.finditer(text):
@@ -146,11 +177,12 @@ def classify_window(text: str, cfg) -> WindowInfo:
         return WindowInfo(label, 1.0, overlap, f"explicit range {label}")
 
     # 2. ISO date ranges (e.g. Unstop's typed start_date - end_date). Only a
-    #    pair next to internship/term context counts as the posting's window: a
-    #    bare date pair in prose is an application or deadline range, so reading
-    #    it as the window would wrongly reject (or wrongly verify) a posting.
-    for m in ISO_RANGE_RE.finditer(text):
-        if not _range_has_context(text, m):
+    #    pair next to genuine timing words in the description itself counts as
+    #    the posting's window: a bare date pair in prose is an application or
+    #    deadline range, so reading it as the window would wrongly reject (or
+    #    wrongly verify) a posting.
+    for m in ISO_RANGE_RE.finditer(iso_text):
+        if not _range_has_context(iso_text, m):
             continue
         m1, m2 = int(m.group("m1")), int(m.group("m2"))
         if m2 >= m1:

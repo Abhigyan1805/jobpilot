@@ -132,7 +132,7 @@ class HimalayasAdapter(SourceAdapter):
             published_at=_iso(job.get("pubDate")),
             is_remote=is_remote,
             salary=self._salary(job),
-            raw=job,
+            raw={**job, "attribution": "data sourced from Himalayas"},
         )
 
     @staticmethod

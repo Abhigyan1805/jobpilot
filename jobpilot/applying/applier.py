@@ -75,10 +75,12 @@ class Applier:
 
         # Guard 1c: an unconfirmed Jan-Jun window is never auto-applied unless
         # the user explicitly loosened it. The posting is still scored and
-        # queued for one-click review.
+        # queued for one-click review. A confirmed overlap is required, not
+        # merely a non-None judgement, so an application/deadline range can
+        # never stand in for the internship's own window.
         if not self.config.filter.allow_unknown_window:
-            window = classify_window(posting.searchable_text(), self.config.filter)
-            if window.overlaps is None:
+            window = classify_window(posting.searchable_text(), self.config.filter, prose=posting.description)
+            if window.overlaps is not True:
                 self._add_reason(
                     plan, "Jan-Jun window unconfirmed; review before applying"
                 )

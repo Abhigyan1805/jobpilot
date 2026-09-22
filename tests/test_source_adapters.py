@@ -19,7 +19,7 @@ from jobpilot.discovery.themuse import TheMuseAdapter
 from jobpilot.discovery.unstop import UnstopAdapter
 from jobpilot.discovery.workable import WorkableAdapter
 from jobpilot.discovery.workable_global import WorkableGlobalAdapter
-from jobpilot.filtering import review_only_reasons
+from jobpilot.filtering import filter_posting, review_only_reasons
 from jobpilot.http import FetchError
 from jobpilot.store import Store
 from tests.helpers import FakeAdapter, plan_for, test_config
@@ -57,6 +57,7 @@ class HimalayasTests(unittest.TestCase):
         self.assertIn("LLM", posting.description)
         self.assertEqual(posting.apply_url, "https://himalayas.app/jobs/ml-intern")
         self.assertIn("10000", posting.salary)
+        self.assertEqual(posting.raw["attribution"], "data sourced from Himalayas")
 
     def test_worldwide_without_restrictions_is_remote(self):
         adapter = HimalayasAdapter(_source(test_config(), "himalayas"), test_config())
@@ -206,6 +207,15 @@ class UnstopTests(unittest.TestCase):
         self.assertIn("2026-01-10 - 2026-06-30", posting.description)
         self.assertIn("Machine Learning", posting.description)
         self.assertIn("Bengaluru", posting.location)
+
+    def test_typed_start_end_window_is_a_verified_in_window_range(self):
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop"), cfg)
+        posting = adapter._normalise(dict(self.ROW))
+        result = filter_posting(posting, cfg.filter)
+        self.assertTrue(result.eligible, result.reject_text())
+        self.assertEqual(result.window_label, "Jan-Jun 2026")
+        self.assertEqual(result.window_confidence, 1.0)
 
     def test_fetch_skips_finished_and_stops_on_last_page(self):
         cfg = test_config()

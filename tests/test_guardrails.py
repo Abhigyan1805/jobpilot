@@ -124,6 +124,23 @@ class GuardrailTests(unittest.TestCase):
         self.assertEqual(adapter.calls, [])
         self.assertFalse(self.store.has_submitted(plan.posting.stable_id))
 
+    def test_deadline_iso_range_overlapping_the_window_never_auto_applies(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        plan = plan_for(
+            posting(
+                job_id="deadline-range-2",
+                title="Machine Learning Intern",
+                employment_type="Internship",
+                description="Deadline: 2025-02-01 through 2025-03-15.",
+            )
+        )
+        outcome = applier.process(plan)
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "window_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(plan.posting.stable_id))
+
     def test_remote_us_only_in_description_never_auto_submitted(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
