@@ -28,7 +28,10 @@ def extract_pdf_text(pdf_path: str, extractor: str, *, timeout: int = 60) -> str
     WSL: an absolute Linux path passed as an argument is not translated and the
     Windows process cannot open it, whereas a relative filename resolved against
     the working directory is. Writing to stdout (``-``) avoids needing a second
-    path that a Windows process also could not reach.
+    path that a Windows process also could not reach. stdout is decoded as UTF-8
+    with ``errors="replace"`` because pdftotext always emits UTF-8 while the
+    invoking process locale need not be, so a strict locale decode of a non-ASCII
+    resume would otherwise raise ``UnicodeDecodeError``.
     """
     pdf = Path(pdf_path)
     if not pdf.exists():

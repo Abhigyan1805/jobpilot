@@ -176,9 +176,11 @@ From the run's own record (`/mnt/d/jobpilot/jobpilot.db`):
   with `cwd` set to the file's directory and a **relative** filename; parseability
   did not.
 - **Fix:** invoke the extractor as `[extractor, "-layout", pdf.name, "-"]` with
-  `cwd = pdf.parent`, reading stdout. This mirrors the compiler's documented WSL
-  pattern and needs no second (unreachable) output path. Added two toolchain-free
-  unit tests asserting the relative-filename + `cwd` invocation.
+  `cwd = pdf.parent`, reading stdout pinned to UTF-8 decoding with
+  `errors="replace"`. This mirrors the compiler's documented WSL pattern and needs
+  no second (unreachable) output path. Added three toolchain-free unit tests: the
+  relative-filename + `cwd` invocation, the no-output error, and non-UTF-8 stdout
+  replaced rather than raised.
 - **Effect:** `parseability_failed` fell from 16/16 to 7/16, and the previously red
   integration test `test_tailored_resume_compiles_and_is_parseable` now passes.
 
