@@ -151,6 +151,29 @@ class WindowIsoRangeTests(unittest.TestCase):
         )
         self.assertIsNone(info.overlaps)
 
+    def test_modal_may_cannot_verify_an_iso_application_range(self):
+        cfg = test_config()
+        info = classify_window(
+            "Machine Learning Intern. You may apply 2025-01-10 to 2025-05-30. Python, RAG.",
+            cfg.filter,
+        )
+        self.assertIsNone(info.overlaps)
+
+    def test_modal_may_iso_range_does_not_reject_an_in_window_internship(self):
+        cfg = test_config()
+        p = posting(
+            job_id="modal-may-range-1",
+            description="Machine Learning Intern. You may apply 2025-08-01 to 2025-11-30. Python, RAG.",
+        )
+        result = filter_posting(p, cfg.filter)
+        self.assertEqual(result.window_label, "unknown")
+        self.assertTrue(result.eligible, result.reject_text())
+
+    def test_verb_mar_cannot_verify_an_iso_application_range(self):
+        cfg = test_config()
+        info = classify_window("The plan might mar dates 2025-01-10 to 2025-05-30.", cfg.filter)
+        self.assertIsNone(info.overlaps)
+
     def test_lone_iso_date_is_not_a_window_signal(self):
         cfg = test_config()
         info = classify_window("Applications close 2026-09-30", cfg.filter)

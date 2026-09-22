@@ -84,7 +84,8 @@ WINDOW_CONTEXT = {
     "commence", "commences", "commencing", "week", "weeks",
     "month", "months", "term", "terms", "semester", "semesters",
     "summer", "winter", "spring", "autumn", "fall", "monsoon",
-    "placement", *MONTHS,
+    "placement",
+    *(m for m in MONTHS if m not in {"may", "mar"}),
 }
 # Explicit deadline/application phrases veto an ISO pair: an application range
 # or deadline is not the internship's window even when timing words appear
