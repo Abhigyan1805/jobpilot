@@ -14,6 +14,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
 ## Project notes
 
 - **Test command:** `python -m unittest discover -s tests -t .` (from repo root). Tests use `unittest`, not pytest.
+- **CI:** `.github/workflows/ci.yml` runs `ruff check .` and the test suite on every PR and push to `main`; the same commands are pinned in `.no-mistakes.yaml` (`commands.lint` is `uvx ruff check .` because `ruff` is not on the pipeline-host PATH, though `uvx` is). Use `python3`, not `python`: only `python3` is installed on the pipeline host (GitHub runners ship both).
+- **Ruff pinning:** `pyproject.toml` sets `[tool.ruff.lint] select = ["E4", "E7", "E9", "F"]`. Ruff 0.16 expanded its default rule set from 59 to 413 rules, so this holds the pre-0.16 stable default and keeps CI lint deterministic; widen it only together with fixing the resulting findings.
 - **No third-party dependencies.** Stdlib only: `urllib`, `html.parser`, `sqlite3`, `tomllib`, `unittest`. Do not add a dependency without a strong reason; `pip install` is blocked in the dev environment anyway.
 - **Read-only inputs** (never modify, paths come from `config.toml`): master profile `PROFILE.md`, style template `Abhigyan_Resume_AI_ML.tex`, and the LaTeX engine. The preamble of the style template is reused verbatim by `jobpilot/resume/generator.py`.
 - **LaTeX engine is a Windows `.exe` run from WSL.** `jobpilot/resume/compiler.py` runs it with `cwd` set to the `.tex` directory and a relative filename so path translation works. `pdftotext.exe` ships in the same MiKTeX bin dir and powers the parseability check.
