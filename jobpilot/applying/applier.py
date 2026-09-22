@@ -2,7 +2,8 @@
 
 Order of guards (all checked before any submission):
 
-1. LinkedIn postings are *never* submitted; they always go to the review queue.
+1. LinkedIn and every other manual-only link-out source are *never* submitted;
+   they always go to the review queue.
 2. A plan flagged during generation is never auto-submitted.
 3. A posting whose Jan-Jun window is unconfirmed is never auto-submitted unless
    ``filter.allow_unknown_window`` is set; it goes to the review queue.

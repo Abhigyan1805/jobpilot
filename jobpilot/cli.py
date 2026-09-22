@@ -5,6 +5,9 @@
     python -m jobpilot --config config.toml queue list
     python -m jobpilot --config config.toml queue approve 3
     python -m jobpilot --config config.toml queue export --out review.json
+    python -m jobpilot --config config.toml link-out list
+    python -m jobpilot --config config.toml link-out add --source internshala \
+        --url <link> --title "Machine Learning Intern" --company Acme
 """
 
 from __future__ import annotations

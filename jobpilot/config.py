@@ -122,7 +122,6 @@ class LinkOutConfig:
     sources: dict[str, LinkOutSource] = field(default_factory=dict)
 
 
-
 @dataclass
 class FilterConfig:
     internship_keywords: list[str] = field(
