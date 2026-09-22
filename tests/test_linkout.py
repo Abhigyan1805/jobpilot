@@ -139,9 +139,17 @@ class ManualReviewRoutingTests(unittest.TestCase):
 class WindowIsoRangeTests(unittest.TestCase):
     def test_iso_start_end_pair_is_an_explicit_in_window_range(self):
         cfg = test_config()
-        info = classify_window("Internship window 2026-01-10 - 2026-06-30", cfg.filter)
+        info = classify_window("Internship starts 2026-01-10 - 2026-06-30", cfg.filter)
         self.assertIs(info.overlaps, True)
         self.assertEqual(info.confidence, 1.0)
+
+    def test_application_period_iso_range_is_not_a_verified_window(self):
+        cfg = test_config()
+        info = classify_window(
+            "Machine Learning Intern. Application period: 2025-01-10 to 2025-05-30. Python, RAG.",
+            cfg.filter,
+        )
+        self.assertIsNone(info.overlaps)
 
     def test_lone_iso_date_is_not_a_window_signal(self):
         cfg = test_config()

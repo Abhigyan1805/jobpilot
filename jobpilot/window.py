@@ -81,10 +81,10 @@ SPRING_TECH_SUFFIXES = {
 # leaked in from a concatenated field is not a timing word.
 WINDOW_CONTEXT = {
     "start", "starts", "starting", "begin", "begins", "beginning",
-    "commence", "commences", "commencing", "duration", "week", "weeks",
+    "commence", "commences", "commencing", "week", "weeks",
     "month", "months", "term", "terms", "semester", "semesters",
     "summer", "winter", "spring", "autumn", "fall", "monsoon",
-    "window", "period", "placement", *MONTHS,
+    "placement", *MONTHS,
 }
 # Explicit deadline/application phrases veto an ISO pair: an application range
 # or deadline is not the internship's window even when timing words appear

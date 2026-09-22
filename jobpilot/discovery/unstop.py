@@ -144,4 +144,4 @@ class UnstopAdapter(SourceAdapter):
         """
         if not start or not end:
             return ""
-        return f"Internship window: {str(start).split('T')[0]} - {str(end).split('T')[0]}"
+        return f"Internship starts: {str(start).split('T')[0]} - {str(end).split('T')[0]}"
