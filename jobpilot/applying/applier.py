@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from jobpilot.applying.base import SubmissionAdapter
 from jobpilot.config import Config
 from jobpilot.filtering import review_only_reasons
+from jobpilot.linkout import is_manual_source
 from jobpilot.models import ApplicationPlan
 from jobpilot.review import queue_plan
 from jobpilot.store import Store
@@ -52,6 +53,18 @@ class Applier:
             plan.requires_review = True
             self._add_reason(plan, "LinkedIn: discovered and tailored, but never auto-submitted (captain applies)")
             return self._to_review(plan, "linkedin_review", "linkedin")
+
+        # Guard 1a: every other manual-only link-out source (Internshala, Naukri,
+        # Wellfound, HiringCafe, a16z, Peak XV, Remote.co) is likewise review-only.
+        # Their terms forbid automation, so jobpilot prepares the packet and the
+        # human submits; a manual route is a human decision and never dedupes away.
+        if is_manual_source(posting.source):
+            plan.requires_review = True
+            self._add_reason(
+                plan,
+                f"{posting.source}: manual link-out source; the pipeline prepares the packet and you submit",
+            )
+            return self._to_review(plan, "manual_review", "manual_source")
 
         # Guard 1b: a plan flagged during generation (compile failure,
         # no-invention, unparseable PDF) is never auto-submitted.

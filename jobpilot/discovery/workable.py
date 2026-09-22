@@ -25,6 +25,11 @@ class WorkableAdapter(SourceAdapter):
                 continue
             jobs = data.get("jobs", []) if isinstance(data, dict) else []
             for job in jobs:
+                # Use Workable's own typed employment_type field; never infer
+                # internship status from the title. Boards that omit the field
+                # are kept for the shared hard filter to judge.
+                if not self.keep_intern(job.get("employment_type")):
+                    continue
                 postings.append(self._normalise(token, data.get("name") or token, job))
         if not postings and errors:
             raise FetchError("; ".join(errors))

@@ -37,6 +37,93 @@ class SourceConfig:
     options: dict[str, Any] = field(default_factory=dict)
 
 
+# Sources whose terms forbid automation (or which block non-browser clients).
+# They are never scraped and never authenticated; instead the pipeline surfaces a
+# configured search link for a human and accepts a posting the human adds by
+# hand. A posting from one of these sources is always review-only: the pipeline
+# prepares the tailored packet and the direct link, and the human submits it.
+DEFAULT_LINK_OUT_SOURCES: dict[str, dict[str, str]] = {
+    "internshala": {
+        "label": "Internshala",
+        "search_url": "https://internshala.com/internships/machine-learning-internship",
+        "terms_note": (
+            "Terms expressly prohibit automated extraction and list AI/ML training; "
+            "robots blocks Anthropic/OpenAI crawlers. Best source for the Jan-May window."
+        ),
+    },
+    "naukri": {
+        "label": "Naukri",
+        "search_url": "https://www.naukri.com/machine-learning-intern-jobs",
+        "terms_note": "Listings API demands an app/system id then a reCAPTCHA; terms and robots forbid automation.",
+    },
+    "linkedin": {
+        "label": "LinkedIn",
+        "search_url": "https://www.linkedin.com/jobs/search/?keywords=intern&location=India",
+        "terms_note": (
+            "robots and the user agreement forbid automated access; jobpilot's optional "
+            "reader is read-only and best-effort, and never authenticates."
+        ),
+    },
+    "wellfound": {
+        "label": "Wellfound",
+        "search_url": "https://wellfound.com/location/india",
+        "terms_note": "Terms ban automated harvesting and scraping; no public API.",
+    },
+    "hiringcafe": {
+        "label": "HiringCafe",
+        "search_url": "https://hiringcafe.com/jobs",
+        "terms_note": "Cloudflare-blocked to non-browser clients and terms forbid reproducing listings.",
+    },
+    "a16z": {
+        "label": "a16z Portfolio Jobs",
+        "search_url": "https://portfoliojobs.a16z.com/jobs",
+        "terms_note": "Consider's terms forbid robots/scrapers; the search API needs a CSRF token and cookies.",
+    },
+    "peakxv": {
+        "label": "Peak XV (Consider)",
+        "search_url": "https://careers.peakxv.com/jobs",
+        "terms_note": (
+            "Same Consider terms; strong India internship inventory, but the endpoint "
+            "needs CSRF and cookies, so it is browse-only."
+        ),
+    },
+    "remote_co": {
+        "label": "Remote.co",
+        "search_url": "https://remote.co/remote-jobs/",
+        "terms_note": "Terms forbid scraping and redistribution of listings; Cloudflare-blocked.",
+    },
+}
+MANUAL_ONLY_SOURCES = frozenset(DEFAULT_LINK_OUT_SOURCES)
+
+#: Automated, read-only discovery adapters that are enabled by default.
+DEFAULT_DISCOVERY_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "himalayas",
+    "unstop",
+    "workable_global",
+    "themuse",
+)
+
+
+@dataclass
+class LinkOutSource:
+    name: str = ""
+    label: str = ""
+    search_url: str = ""
+    terms_note: str = ""
+    enabled: bool = True
+
+
+@dataclass
+class LinkOutConfig:
+    enabled: bool = True
+    sources: dict[str, LinkOutSource] = field(default_factory=dict)
+
+
+
 @dataclass
 class FilterConfig:
     internship_keywords: list[str] = field(
@@ -204,6 +291,7 @@ class Config:
     match: MatchConfig = field(default_factory=MatchConfig)
     apply: ApplyConfig = field(default_factory=ApplyConfig)
     linkedin: LinkedInConfig = field(default_factory=LinkedInConfig)
+    link_out: LinkOutConfig = field(default_factory=LinkOutConfig)
     config_path: str = ""
     base_dir: str = ""
 
@@ -223,9 +311,34 @@ class Config:
 
 def default_config() -> Config:
     cfg = Config()
-    for name in ("greenhouse", "lever", "ashby", "workable"):
+    for name in DEFAULT_DISCOVERY_SOURCES:
         cfg.sources[name] = SourceConfig(name=name, enabled=True)
+    cfg.link_out = LinkOutConfig(
+        sources={
+            name: LinkOutSource(name=name, **spec)
+            for name, spec in DEFAULT_LINK_OUT_SOURCES.items()
+        }
+    )
     return cfg
+
+
+def _overlay_link_out(cfg: Config, raw: dict[str, Any]) -> None:
+    spec = raw.get("link_out")
+    if not isinstance(spec, dict):
+        return
+    if "enabled" in spec:
+        cfg.link_out.enabled = bool(spec["enabled"])
+    for name, entry in (spec.get("sources") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        existing = cfg.link_out.sources.get(name, LinkOutSource(name=name))
+        existing.name = name
+        for key in ("label", "search_url", "terms_note"):
+            if key in entry:
+                setattr(existing, key, str(entry[key]))
+        if "enabled" in entry:
+            existing.enabled = bool(entry["enabled"])
+        cfg.link_out.sources[name] = existing
 
 
 def _overlay_sources(cfg: Config, raw: dict[str, Any]) -> None:
@@ -272,4 +385,5 @@ def load_config(path: str | os.PathLike[str]) -> Config:
     if "linkedin" in raw:
         _update_dataclass(cfg.linkedin, raw["linkedin"])
     _overlay_sources(cfg, raw)
+    _overlay_link_out(cfg, raw)
     return cfg

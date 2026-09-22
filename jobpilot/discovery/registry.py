@@ -10,10 +10,14 @@ from jobpilot.config import Config
 from jobpilot.discovery.ashby import AshbyAdapter
 from jobpilot.discovery.base import FetchOutcome, SourceAdapter
 from jobpilot.discovery.greenhouse import GreenhouseAdapter
+from jobpilot.discovery.himalayas import HimalayasAdapter
 from jobpilot.discovery.lever import LeverAdapter
 from jobpilot.discovery.linkedin import LinkedInAdapter
 from jobpilot.discovery.localfile import LocalFileAdapter
+from jobpilot.discovery.themuse import TheMuseAdapter
+from jobpilot.discovery.unstop import UnstopAdapter
 from jobpilot.discovery.workable import WorkableAdapter
+from jobpilot.discovery.workable_global import WorkableGlobalAdapter
 from jobpilot.http import RateLimiter
 from jobpilot.models import JobPosting
 
@@ -22,6 +26,10 @@ ADAPTERS: dict[str, type[SourceAdapter]] = {
     "lever": LeverAdapter,
     "ashby": AshbyAdapter,
     "workable": WorkableAdapter,
+    "himalayas": HimalayasAdapter,
+    "unstop": UnstopAdapter,
+    "workable_global": WorkableGlobalAdapter,
+    "themuse": TheMuseAdapter,
     "linkedin": LinkedInAdapter,
     "local": LocalFileAdapter,
 }

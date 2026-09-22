@@ -26,6 +26,10 @@ class GreenhouseAdapter(SourceAdapter):
                 errors.append(f"{token}: {exc}")
                 continue
             for job in data.get("jobs", []) or []:
+                # Prefer Greenhouse's own typed employment-type metadata; never
+                # infer internship status from the title.
+                if not self.keep_intern(self._employment_type(job)):
+                    continue
                 postings.append(self._normalise(token, job))
         if not postings and errors:
             raise FetchError("; ".join(errors))

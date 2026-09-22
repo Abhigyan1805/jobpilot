@@ -18,9 +18,12 @@ employer, date, metric or project.
 
 1. **Discovery** - pulls internship postings from the public, permission-respecting
    endpoints of Greenhouse, Lever, Ashby and Workable (a configurable list of board
-   tokens), plus an optional read-only LinkedIn listing reader that never logs in,
-   never authenticates and never applies. Every source is a pluggable adapter behind
-   one interface, and one source failing never aborts the run.
+   tokens), plus four catalogue/search sources: Himalayas, Unstop, Workable's
+   global job search and The Muse, plus an optional read-only LinkedIn listing
+   reader that never logs in, never authenticates and never applies. Every source
+   is a pluggable adapter behind one interface, and one source failing never
+   aborts the run. Sources whose terms forbid automation are never scraped:
+   they are surfaced as **link-out** channels instead (see below).
 2. **Filtering and matching** - hard filters first (must be an internship, must
    plausibly run in Jan-Jun, must be open to India or remote from India), then a
    deterministic, documented scoring rubric against the master profile.
@@ -145,10 +148,13 @@ click.
 ## Safety model
 
 - **Auto-apply only to strong matches.** Everything else is queued for review.
-- **LinkedIn is never auto-submitted.** LinkedIn postings are discovered, ranked,
-  tailored and packaged, then placed in the review queue with their direct apply
-  link - you submit them yourself. The pipeline never authenticates and never
-  touches your LinkedIn account.
+- **LinkedIn and every other manual-only source are never auto-submitted.**
+  LinkedIn postings are discovered, ranked, tailored and packaged, then placed in
+  the review queue with their direct apply link - you submit them yourself. The
+  pipeline never authenticates and never touches your LinkedIn account. Postings
+  from the link-out channel (Internshala, Naukri, Wellfound, HiringCafe, a16z,
+  Peak XV, Remote.co) are never scraped and never auto-submitted either: they are
+  prepared as packets for one-click human submission.
 - **Dedupe on a stable job id.** An attempt is recorded *before* submitting, so a
   crash mid-submit cannot produce a second application.
 - **No required field is ever guessed.** If a required form field cannot be answered
@@ -229,16 +235,61 @@ the sections and keywords survive, then reports keyword gaps honestly.
 
 ## Discovery sources and their honest limitations
 
-All sources are read-only and unauthenticated. Source failures are isolated and
-reported; the rest of the run continues.
+All automated sources are read-only and unauthenticated. Source failures are
+isolated and reported; the rest of the run continues. Internship status is
+taken from each board's own **typed field** where it exists (`commitment=Intern`
+on Lever, `employmentType` on Ashby, `employment_type` on Workable, Greenhouse's
+employment-type metadata, `level=Internship` on The Muse, `employment_type=Intern`
+on Himalayas); a title alone is never used to infer it. Where a source exposes no
+typed field, the posting is kept and the shared hard filter decides.
 
 | Source | Endpoint | Limitations |
 | --- | --- | --- |
-| **Greenhouse** | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Undocumented public endpoint; may change shape or rate-limit; only boards whose token you configure. |
-| **Lever** | `api.lever.co/v0/postings/{token}?mode=json` | Team/commitment fields vary; only configured tokens. |
-| **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; compensation fields optional; only configured tokens. |
-| **Workable** | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. |
-| **LinkedIn** (optional, disabled by default) | public guest job-search HTML | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** Never logs in, never authenticates, never applies, low rate, degrades gracefully to the ATS sources. Never auto-submitted. |
+| **Greenhouse** | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Undocumented public endpoint; may change shape or rate-limit; only boards whose token you configure. Drops postings whose typed employment type is clearly not an internship; keeps those with no typed field. |
+| **Lever** | `api.lever.co/v0/postings/{token}?mode=json&commitment=Intern` | Documented `commitment=Intern` filter (case-sensitive); only boards whose token you configure. |
+| **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; keeps only jobs whose typed `employmentType` is `Intern`; only configured tokens. |
+| **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Drops rows whose typed `employment_type` is clearly not an internship. |
+| **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` | Free, no key; integer `page` pagination (20/page). Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
+| **Unstop** | `unstop.com/api/public/opportunity/search-result?opportunity=internships&page=N` | India-native live internship feed (~10,000 rows); its `robots.txt` explicitly allows `/api/public/*`. 10/page. Typed `start_date`/`end_date` are mapped into the window check; a lone date is left as "unknown window" (review-only). |
+| **Workable** (global search) | `jobs.workable.com/api/v1/jobs?query=intern&location=India` | **Undocumented** cross-company search; paginates with an opaque `pageToken`. `robots.txt` sets `ai-train=no` (data must not be used for model training). Its `employmentType` is unreliable, so it relies on Workable's own server-side `query=intern` search. |
+| **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
+| **LinkedIn** (optional, disabled by default) | public guest job-search HTML | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** Never logs in, never authenticates, never applies, low rate, degrades gracefully. Never auto-submitted. |
+
+### Link-out sources (manual only, never scraped)
+
+Some of the best inventory for a January-May India internship lives on sites whose
+terms **forbid automation**, so jobpilot deliberately does not scrape or
+authenticate to them. This is a product choice, not a missing feature: the
+pipeline still does everything it lawfully can, and you do the final click.
+
+```bash
+python -m jobpilot --config config.toml link-out list
+```
+
+This prints a configured saved-search link per source - Internshala, Naukri,
+LinkedIn, Wellfound, HiringCafe, a16z Portfolio Jobs, Peak XV and Remote.co - with
+a one-line note on why each is manual. **Internshala matters most**: its listings
+carry explicit start windows ("can start the internship between 13th Jan'26 and
+17th Feb'26") and it has the largest AI/ML internship inventory in India, but its
+terms expressly prohibit automated extraction. When you find a posting there, add
+it by hand and jobpilot runs its normal requirement extraction, matching, tailored
+resume, cover letter and packet generation:
+
+```bash
+python -m jobpilot --config config.toml link-out add \
+  --source internshala \
+  --url "https://internshala.com/internship/..." \
+  --title "Machine Learning Intern" \
+  --company "Acme" \
+  --location "Bengaluru, India" \
+  --description-file jd.txt
+```
+
+The result is a ready-to-apply packet (resume PDF, cover letter PDF, direct link,
+matched and gap JD keywords) in the review queue. Manual-source postings are
+**always review-only**: the pipeline never auto-submits them, and re-adding the
+same URL dedupes on a stable id derived from it. The search links are configurable
+under `[link_out]` in `config.toml`.
 
 The local-file adapter (`[sources.local]`) reads a JSON posting list and exists for
 offline verification, fixtures and the demo; it is a demonstration that sources are
@@ -281,5 +332,9 @@ toolchain is unavailable).
   but is only ever eligible for review, never auto-apply. Set
   `filter.allow_unknown_window = true` to allow auto-apply of unknown-window
   internships.
-- Discovery only sees boards whose tokens you configure - there is no global job
-  search, and there is no public directory mapping companies to board tokens.
+- Discovery covers four ATS board APIs (only the tokens you configure), four
+  catalogue/search sources (Himalayas, Unstop, Workable global, The Muse) and an
+  optional read-only LinkedIn reader, plus the manual link-out channel. The
+  search sources are best-effort: endpoints can change, some are undocumented,
+  and their intern/India filters vary in precision, so the hard filters still run
+  over every hit.

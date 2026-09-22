@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from jobpilot.discovery.base import SourceAdapter
 from jobpilot.htmlutil import html_to_text
 from jobpilot.http import FetchError, fetch_json
 from jobpilot.models import JobPosting
 
-BOARD_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
+POSTINGS_URL = "https://api.lever.co/v0/postings/{token}"
 
 
 class LeverAdapter(SourceAdapter):
@@ -17,7 +19,13 @@ class LeverAdapter(SourceAdapter):
         postings: list[JobPosting] = []
         errors: list[str] = []
         for token in self.tokens:
-            url = BOARD_URL.format(token=token)
+            # Lever documents a `commitment` filter (case-sensitive). Use the
+            # board's typed field server-side instead of matching titles.
+            params = {"mode": "json"}
+            commitment = self.option("commitment", "Intern")
+            if commitment:
+                params["commitment"] = str(commitment)
+            url = f"{POSTINGS_URL.format(token=token)}?{urlencode(params)}"
             try:
                 data = fetch_json(url, timeout=float(self.option("timeout", 20)))
             except FetchError as exc:
@@ -27,6 +35,9 @@ class LeverAdapter(SourceAdapter):
                 errors.append(f"{token}: unexpected response shape")
                 continue
             for job in data:
+                commitment_value = (job.get("categories") or {}).get("commitment", "") or ""
+                if not self.keep_intern(commitment_value):
+                    continue
                 postings.append(self._normalise(token, job))
         if not postings and errors:
             raise FetchError("; ".join(errors))

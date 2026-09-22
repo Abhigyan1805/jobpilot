@@ -32,6 +32,10 @@ class SourceAdapter(ABC):
     name: str = "base"
     #: Board tokens or search parameters come from config; no default tokens.
     requires_tokens: bool = True
+    #: Default for the ``intern_only`` typed-field filter. Subclasses whose
+    #: structured employment-type field is not a reliable intern signal set
+    #: this to False; callers can still override it per source in config.
+    intern_only_default: bool = True
 
     def __init__(self, source_config: SourceConfig, config: Config, limiter: RateLimiter | None = None):
         self.source_config = source_config
@@ -44,6 +48,29 @@ class SourceAdapter(ABC):
 
     def option(self, key: str, default=None):
         return self.source_config.options.get(key, default)
+
+    def intern_only(self) -> bool:
+        """Whether to drop postings whose structured employment type is clearly not an internship."""
+        value = self.option("intern_only", self.intern_only_default)
+        if isinstance(value, str):
+            return value.strip().lower() not in ("false", "0", "no", "off")
+        return bool(value)
+
+    def keep_intern(self, employment_type: str) -> bool:
+        """Keep a posting based on its *structured* employment type.
+
+        A source's own typed field (``commitment``, ``employmentType``,
+        ``employment_type``) is authoritative for internship status. Title text
+        is never used to infer it here. An absent typed value is kept so the
+        shared hard filter can decide; a present, clearly non-intern typed value
+        is dropped when ``intern_only`` is on.
+        """
+        if not self.intern_only():
+            return True
+        value = (employment_type or "").strip().lower()
+        if not value:
+            return True
+        return "intern" in value
 
     @abstractmethod
     def fetch(self) -> list[JobPosting]:

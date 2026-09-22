@@ -51,6 +51,16 @@ SEASON_MONTHS = {
 NUMERIC_RANGE_RE = re.compile(
     r"\b(?P<m1>0?[1-9]|1[0-2])\s*/\s*(?P<y1>\d{4})?\s*(?:-|–|—|to)\s*(?P<m2>0?[1-9]|1[0-2])\s*/\s*(?P<y2>\d{4})\b"
 )
+# ISO date ranges such as "2026-01-15 - 2026-06-30", used by sources (Unstop)
+# that expose a typed start/end date pair. Only a genuine pair is meaningful: a
+# lone ISO date is deliberately not treated as a timing signal, because a posted
+# or deadline date would otherwise hard-reject an in-window internship.
+ISO_RANGE_RE = re.compile(
+    r"\b(?P<y1>(?:19|20)\d{2})-(?P<m1>0[1-9]|1[0-2])-\d{2}"
+    r"\s*(?:-|–|—|to|through|until|till)\s*"
+    r"(?P<y2>(?:19|20)\d{2})-(?P<m2>0[1-9]|1[0-2])-\d{2}\b",
+    re.IGNORECASE,
+)
 YEAR_TOKEN_RE = re.compile(r"^(?:19|20)\d{2}$")
 # Season words only count when they sit next to internship/term context (or a
 # year) so that product/technology names such as "Spring Boot" cannot corrupt
@@ -124,14 +134,24 @@ def classify_window(text: str, cfg) -> WindowInfo:
         overlap = bool(months & window)
         return WindowInfo(label, 1.0, overlap, f"explicit range {label}")
 
-    # 2. Numeric month/year ranges such as 01/2026 - 06/2026.
+    # 2. ISO date ranges (e.g. Unstop's typed start_date - end_date).
+    for m in ISO_RANGE_RE.finditer(text):
+        m1, m2 = int(m.group("m1")), int(m.group("m2"))
+        if m2 >= m1:
+            months = set(range(m1, m2 + 1))
+        else:
+            months = set(range(m1, 13)) | set(range(1, m2 + 1))
+        label = _label(m1, m2, m.group("y1") or m.group("y2") or "")
+        return WindowInfo(label, 1.0, bool(months & window), f"explicit range {label}")
+
+    # 3. Numeric month/year ranges such as 01/2026 - 06/2026.
     for m in NUMERIC_RANGE_RE.finditer(text):
         m1, m2 = int(m.group("m1")), int(m.group("m2"))
         months = set(range(min(m1, m2), max(m1, m2) + 1))
         label = _label(min(m1, m2), max(m1, m2), m.group("y1") or m.group("y2") or "")
         return WindowInfo(label, 1.0, bool(months & window), f"explicit range {label}")
 
-    # 3. Season words, but only when a nearby internship/term word or year
+    # 4. Season words, but only when a nearby internship/term word or year
     #    confirms the season is really the posting's timing and not a tech name.
     for m in SEASON_RE.finditer(text):
         season = m.group("season").lower()
@@ -146,7 +166,7 @@ def classify_window(text: str, cfg) -> WindowInfo:
         label = f"{season.capitalize()}{(' ' + year) if year else ''}"
         return WindowInfo(label, 0.6, bool(months & window), f"season {label}")
 
-    # 4. A single month-year is weak but usable.
+    # 5. A single month-year is weak but usable.
     singles = list(SINGLE_RE.finditer(text))
     if singles:
         for m in singles:
