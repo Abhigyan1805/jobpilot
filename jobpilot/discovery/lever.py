@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlencode
-
 from jobpilot.discovery.base import SourceAdapter
 from jobpilot.htmlutil import html_to_text
 from jobpilot.http import FetchError, fetch_json
@@ -19,13 +17,7 @@ class LeverAdapter(SourceAdapter):
         postings: list[JobPosting] = []
         errors: list[str] = []
         for token in self.tokens:
-            # Lever documents a `commitment` filter (case-sensitive). Use the
-            # board's typed field server-side instead of matching titles.
-            params = {"mode": "json"}
-            commitment = self.option("commitment", "Intern")
-            if commitment:
-                params["commitment"] = str(commitment)
-            url = f"{POSTINGS_URL.format(token=token)}?{urlencode(params)}"
+            url = f"{POSTINGS_URL.format(token=token)}?mode=json"
             try:
                 data = fetch_json(url, timeout=float(self.option("timeout", 20)))
             except FetchError as exc:

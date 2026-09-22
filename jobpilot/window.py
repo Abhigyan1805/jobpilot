@@ -90,6 +90,17 @@ def _season_has_context(text: str, match: re.Match, season: str) -> bool:
     return False
 
 
+def _range_has_context(text: str, match: re.Match) -> bool:
+    """Whether an ISO date pair sits next to internship/term/window context.
+
+    An arbitrary date pair in prose (an application or deadline range) is not
+    the internship's own window, so it must not be read as one.
+    """
+    before = re.findall(r"[A-Za-z0-9-]+", text[: match.start()])[-2:]
+    after = re.findall(r"[A-Za-z0-9-]+", text[match.end():])[:2]
+    return any(token.lower() in SEASON_CONTEXT for token in (*before, *after))
+
+
 @dataclass
 class WindowInfo:
     label: str
@@ -134,8 +145,13 @@ def classify_window(text: str, cfg) -> WindowInfo:
         overlap = bool(months & window)
         return WindowInfo(label, 1.0, overlap, f"explicit range {label}")
 
-    # 2. ISO date ranges (e.g. Unstop's typed start_date - end_date).
+    # 2. ISO date ranges (e.g. Unstop's typed start_date - end_date). Only a
+    #    pair next to internship/term context counts as the posting's window: a
+    #    bare date pair in prose is an application or deadline range, so reading
+    #    it as the window would wrongly reject (or wrongly verify) a posting.
     for m in ISO_RANGE_RE.finditer(text):
+        if not _range_has_context(text, m):
+            continue
         m1, m2 = int(m.group("m1")), int(m.group("m2"))
         if m2 >= m1:
             months = set(range(m1, m2 + 1))

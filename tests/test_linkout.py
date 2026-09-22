@@ -12,6 +12,7 @@ from unittest import mock
 from jobpilot.applying.applier import Applier
 from jobpilot.cli import main
 from jobpilot.config import MANUAL_ONLY_SOURCES, load_config
+from jobpilot.filtering import filter_posting
 from jobpilot.linkout import build_manual_posting, configured_sources, is_manual_source
 from jobpilot.pipeline import PipelineResult, run_manual_pipeline
 from jobpilot.store import TRANSIENT_REVIEW_REASONS, Store
@@ -146,6 +147,26 @@ class WindowIsoRangeTests(unittest.TestCase):
         cfg = test_config()
         info = classify_window("Applications close 2026-09-30", cfg.filter)
         self.assertIsNone(info.overlaps)
+
+    def test_deadline_iso_range_in_prose_is_not_a_window_signal(self):
+        cfg = test_config()
+        info = classify_window(
+            "Machine Learning Intern. Applications accepted 2025-08-01 through 2025-11-30.",
+            cfg.filter,
+        )
+        self.assertIsNone(info.overlaps)
+
+    def test_deadline_iso_range_does_not_reject_an_in_window_internship(self):
+        cfg = test_config()
+        p = posting(
+            job_id="deadline-range-1",
+            description=(
+                "Machine learning internship. Applications accepted 2025-08-01 through "
+                "2025-11-30. Python, RAG, LLMs."
+            ),
+        )
+        result = filter_posting(p, cfg.filter)
+        self.assertTrue(result.eligible, result.reject_text())
 
 
 class ManualPipelineTests(unittest.TestCase):
@@ -378,6 +399,80 @@ class UserAddedLinkOutSourceTests(unittest.TestCase):
             self.assertEqual(outcome.status, "manual_review")
             self.assertEqual(adapter.calls, [])
             self.assertFalse(store.has_submitted(p.stable_id))
+        finally:
+            store.close()
+
+
+class DisabledLinkOutSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config_path = Path(self.tmp.name) / "config.toml"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_config(self, body: str) -> None:
+        self.config_path.write_text(
+            "[profile]\n"
+            f'path = "{MINI_PROFILE}"\n'
+            "[output]\n"
+            f'dir = "{self.tmp.name}/out"\n'
+            f'database = "{self.tmp.name}/jobpilot.db"\n' + body,
+            encoding="utf-8",
+        )
+
+    def test_add_rejects_a_source_disabled_by_the_channel_flag(self):
+        self._write_config("[link_out]\nenabled = false\n")
+        cfg = load_config(self.config_path)
+        with self.assertRaises(ValueError):
+            build_manual_posting(
+                cfg, source="internshala", url="https://x/1", title="Intern", company="A"
+            )
+
+    def test_add_rejects_a_per_source_disabled_source(self):
+        self._write_config("[link_out]\nenabled = true\n[link_out.sources.naukri]\nenabled = false\n")
+        cfg = load_config(self.config_path)
+        with self.assertRaises(ValueError):
+            build_manual_posting(cfg, source="naukri", url="https://x/1", title="Intern", company="A")
+
+    def test_cli_add_rejects_a_disabled_source(self):
+        self._write_config("[link_out]\nenabled = false\n")
+        buffer = io.StringIO()
+        errors = io.StringIO()
+        with redirect_stdout(buffer), redirect_stderr(errors), mock.patch(
+            "jobpilot.cli.run_manual_pipeline"
+        ) as run:
+            code = main(
+                [
+                    "--config",
+                    str(self.config_path),
+                    "link-out",
+                    "add",
+                    "--source",
+                    "internshala",
+                    "--url",
+                    "https://x/1",
+                    "--title",
+                    "Intern",
+                    "--company",
+                    "A",
+                ]
+            )
+        self.assertEqual(code, 2)
+        run.assert_not_called()
+
+    def test_posting_from_a_disabled_source_is_still_review_only(self):
+        self._write_config("[link_out]\nenabled = false\n")
+        cfg = load_config(self.config_path)
+        store = Store(":memory:")
+        try:
+            adapter = FakeAdapter(cfg)
+            applier = Applier(store, cfg, adapter, cfg.output.dir)
+            p = posting(source="internshala", job_id="disabled-1", description=IN_WINDOW)
+            outcome = applier.process(plan_for(p))
+            self.assertEqual(outcome.action, "review")
+            self.assertEqual(outcome.status, "manual_review")
+            self.assertEqual(adapter.calls, [])
         finally:
             store.close()
 

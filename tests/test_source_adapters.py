@@ -233,7 +233,9 @@ class AdapterCoverageTests(unittest.TestCase):
         ]
         with mock.patch("jobpilot.discovery.lever.fetch_json", return_value=payload) as fetch:
             postings = adapter.fetch()
-        self.assertIn("commitment=Intern", fetch.call_args_list[0].args[0])
+        url = fetch.call_args_list[0].args[0]
+        self.assertNotIn("commitment", url)
+        self.assertNotIn("employment", url)
         self.assertEqual([p.job_id for p in postings], ["1", "2"])
         self.assertEqual(postings[1].employment_type, "Fulltime")
 

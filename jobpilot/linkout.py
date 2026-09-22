@@ -70,6 +70,11 @@ def build_manual_posting(
             f"{source!r} is not a manual-only link-out source; expected one of "
             f"{', '.join(sorted(config.link_out.sources))}"
         )
+    if source not in {s.name for s in configured_sources(config)}:
+        raise ValueError(
+            f"{source!r} is a configured link-out source but is disabled; "
+            "enable the [link_out] channel and the source to add postings from it"
+        )
     if not (url or "").strip():
         raise ValueError("a direct posting URL is required to add a manual posting")
     if not (title or "").strip():

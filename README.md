@@ -248,7 +248,7 @@ routes it to human review instead of discarding it.
 | Source | Endpoint | Limitations |
 | --- | --- | --- |
 | **Greenhouse** | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Undocumented public endpoint; may change shape or rate-limit; only boards whose token you configure. Carries each job's typed employment-type metadata for the shared filter; never drops on it. |
-| **Lever** | `api.lever.co/v0/postings/{token}?mode=json&commitment=Intern` | Documented `commitment` field (case-sensitive); the adapter requests `commitment=Intern` as a search scope and carries each job's typed `commitment` for the shared filter. Only boards whose token you configure. |
+| **Lever** | `api.lever.co/v0/postings/{token}?mode=json` | Documented postings endpoint; carries each job's typed `commitment` for the shared filter and never drops on it, so a genuine intern a board tags `Fulltime` still reaches review. Only boards whose token you configure. |
 | **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; carries each job's typed `employmentType` for the shared filter; never drops on it. Only configured tokens. |
 | **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Carries each row's typed `employment_type` for the shared filter; never drops on it. |
 | **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` | Free, no key; integer `page` pagination (20/page). Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
