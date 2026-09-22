@@ -141,6 +141,24 @@ class GuardrailTests(unittest.TestCase):
         self.assertEqual(adapter.calls, [])
         self.assertFalse(self.store.has_submitted(plan.posting.stable_id))
 
+    def test_application_period_with_start_verb_never_auto_applies(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        plan = plan_for(
+            posting(
+                job_id="application-period-verb-1",
+                description=(
+                    "Machine Learning Intern. Application period begins 2025-01-10 to "
+                    "2025-05-30. Python, RAG."
+                ),
+            )
+        )
+        outcome = applier.process(plan)
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "window_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(plan.posting.stable_id))
+
     def test_remote_us_only_in_description_never_auto_submitted(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)

@@ -76,33 +76,42 @@ SPRING_TECH_SUFFIXES = {
     "boot", "cloud", "framework", "security", "mvc", "batch", "webflux",
     "jpa", "graphql", "actuator", "data",
 }
-# Words that name a timing window. An ISO date pair only counts when one of
-# these sits next to it *in the description itself*; a bare "Internship" token
-# leaked in from a concatenated field is not a timing word.
-WINDOW_CONTEXT = {
-    "start", "starts", "starting", "begin", "begins", "beginning",
-    "commence", "commences", "commencing", "week", "weeks",
-    "month", "months", "term", "terms", "semester", "semesters",
+# Nouns that name the internship/term window itself. An ISO date pair is only
+# the posting's own window when its clause is anchored to one of these (or to a
+# month/season name). A bare start verb ("starts", "begins") is deliberately
+# *not* an anchor: the subject of the clause decides, never a verb inside it.
+WINDOW_SUBJECTS = {
+    "intern", "interns", "internship", "internships",
+    "coop", "co-op", "cooperative", "trainee", "trainees",
+    "placement", "placements", "term", "terms",
+    "semester", "semesters", "session", "sessions",
+    "program", "programme", "programs", "programmes",
+    "duration", "week", "weeks", "month", "months",
+    "join", "joining",
     "summer", "winter", "spring", "autumn", "fall", "monsoon",
-    "placement",
     *(m for m in MONTHS if m not in {"may", "mar"}),
 }
-# Explicit deadline/application phrases veto an ISO pair: an application range
-# or deadline is not the internship's window even when timing words appear
-# nearby. The phrase must sit in the pair's own clause, so deadline prose in a
-# following sentence cannot demote a genuine typed window.
-DEADLINE_PHRASES = (
-    "apply by",
-    "application window",
-    "applications close",
-    "application closes",
-    "applications accepted",
-    "application accepted",
-    "applications are invited",
-    "deadline",
-)
-# Clause terminators bound how far a deadline phrase or timing word reaches
-# around a date pair.
+# Nouns that name the application/hiring/review process rather than the
+# internship. When the pair's own clause is about the process, the pair is never
+# a verified window whatever start verb it carries, so the window stays unknown
+# and the posting is surfaced for review instead of rejected or auto-applied.
+# This keys on the clause subject, so it also replaces the old exact-phrase
+# deadline vetoes that a generic start verb could slip past.
+PROCESS_SUBJECTS = {
+    "application", "applications", "applicant", "applicants",
+    "apply", "applying", "applies", "applied",
+    "submission", "submissions", "submit", "submitting", "submitted",
+    "registration", "register", "registering",
+    "deadline", "deadlines",
+    "hiring", "hire", "hired",
+    "interview", "interviews", "interviewing",
+    "review", "reviews", "reviewing",
+    "offer", "offers", "onboarding",
+    "recruit", "recruiting", "recruitment",
+    "screening", "selection", "shortlist", "shortlisted",
+    "decision", "decisions",
+}
+# Clause terminators bound how far a subject test reaches around a date pair.
 _CLAUSE_BREAKS = ".!?\n;"
 
 
@@ -132,22 +141,27 @@ def _clause_after(text: str, pos: int) -> str:
 def _range_has_context(text: str, match: re.Match) -> bool:
     """Whether an ISO date pair is the posting's own window.
 
-    Only a genuine timing word in the pair's own clause establishes a window,
-    and an explicit deadline/application phrase in that same clause vetoes it,
-    because an application or deadline range is not the internship's window.
+    The decision keys on the subject of the pair's own clause, never on a verb
+    inside it:
+
+    * a process-subject clause (application, hiring, interview, review, ...) is
+      never the internship window, so the posting stays "unknown" and is
+      surfaced for review rather than rejected or auto-applied;
+    * a clause anchored to a genuine window subject (internship, term, month,
+      season, ...) is the window;
+    * a clause with neither subject is unknown.
+
     ``text`` is the posting's own prose (the description), so an adjacent
-    concatenated field such as ``employment_type`` can never supply the context.
+    concatenated field such as ``employment_type`` can never supply the subject.
     """
     before = _clause_before(text, match.start())
     after = _clause_after(text, match.end())
-    label = f"{before} {after}".lower()
-    if any(re.search(rf"\b{re.escape(phrase)}\b", label) for phrase in DEADLINE_PHRASES):
+    tokens = {
+        token.lower() for token in re.findall(r"[A-Za-z0-9-]+", f"{before} {after}")
+    }
+    if tokens & PROCESS_SUBJECTS:
         return False
-    nearby = [
-        token.lower()
-        for token in (*re.findall(r"[A-Za-z0-9-]+", before)[-2:], *re.findall(r"[A-Za-z0-9-]+", after)[:2])
-    ]
-    return any(token in WINDOW_CONTEXT for token in nearby)
+    return bool(tokens & WINDOW_SUBJECTS)
 
 
 @dataclass

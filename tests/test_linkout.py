@@ -174,6 +174,49 @@ class WindowIsoRangeTests(unittest.TestCase):
         info = classify_window("The plan might mar dates 2025-01-10 to 2025-05-30.", cfg.filter)
         self.assertIsNone(info.overlaps)
 
+    def test_application_period_with_start_verb_is_not_a_verified_window(self):
+        cfg = test_config()
+        info = classify_window(
+            "Machine Learning Intern. Application period begins 2025-01-10 to 2025-05-30. Python, RAG.",
+            cfg.filter,
+        )
+        self.assertIsNone(info.overlaps)
+
+    def test_application_period_with_start_verb_does_not_reject_an_in_window_internship(self):
+        cfg = test_config()
+        p = posting(
+            job_id="application-period-verb-1",
+            description=(
+                "Machine Learning Intern. Application period begins 2025-08-01 to "
+                "2025-11-30. Python, RAG."
+            ),
+        )
+        result = filter_posting(p, cfg.filter)
+        self.assertEqual(result.window_label, "unknown")
+        self.assertTrue(result.eligible, result.reject_text())
+
+    def test_typed_window_survives_application_period_prose_alongside(self):
+        cfg = test_config()
+        p = posting(
+            job_id="typed-window-alongside-application-1",
+            description=(
+                "Internship starts: 2026-01-10 - 2026-06-30. "
+                "Application period begins 2025-08-01 to 2025-11-30."
+            ),
+        )
+        info = classify_window(p.searchable_text(), cfg.filter, prose=p.description)
+        self.assertIs(info.overlaps, True)
+        self.assertEqual(info.confidence, 1.0)
+
+    def test_typed_window_start_verb_is_not_itself_the_anchor(self):
+        cfg = test_config()
+        info = classify_window("This role starts 2026-01-10 - 2026-06-30", cfg.filter)
+        info_role = classify_window("Position begins 2026-01-10 to 2026-06-30", cfg.filter)
+        info_internship = classify_window("Internship starts 2026-01-10 - 2026-06-30", cfg.filter)
+        self.assertIsNone(info.overlaps)
+        self.assertIsNone(info_role.overlaps)
+        self.assertIs(info_internship.overlaps, True)
+
     def test_lone_iso_date_is_not_a_window_signal(self):
         cfg = test_config()
         info = classify_window("Applications close 2026-09-30", cfg.filter)
