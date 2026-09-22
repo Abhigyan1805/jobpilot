@@ -383,8 +383,6 @@ def _postings_from_store(store: Store) -> list[JobPosting]:
 
 
 def _eligible_from_store(store: Store, postings: list[JobPosting], matcher: Matcher):
-    import json
-
     eligible = []
     for posting in postings:
         row = store.get_posting(posting.stable_id)

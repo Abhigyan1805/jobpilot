@@ -164,7 +164,6 @@ def parse_profile_text(text: str) -> Profile:
     profile = Profile(raw_text=text)
     section = ""
     current: Entry | None = None
-    in_education = False
 
     lines = text.splitlines()
     for line in lines:
