@@ -93,7 +93,6 @@ DEFAULT_LINK_OUT_SOURCES: dict[str, dict[str, str]] = {
         "terms_note": "Terms forbid scraping and redistribution of listings; Cloudflare-blocked.",
     },
 }
-MANUAL_ONLY_SOURCES = frozenset(DEFAULT_LINK_OUT_SOURCES)
 
 #: Automated, read-only discovery adapters that are enabled by default.
 DEFAULT_DISCOVERY_SOURCES = (

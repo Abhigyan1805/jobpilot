@@ -11,7 +11,7 @@ from unittest import mock
 
 from jobpilot.applying.applier import Applier
 from jobpilot.cli import main
-from jobpilot.config import MANUAL_ONLY_SOURCES, load_config
+from jobpilot.config import DEFAULT_LINK_OUT_SOURCES, load_config
 from jobpilot.filtering import filter_posting
 from jobpilot.linkout import build_manual_posting, configured_sources, is_manual_source
 from jobpilot.pipeline import PipelineResult, run_manual_pipeline
@@ -26,7 +26,7 @@ class LinkOutConfigTests(unittest.TestCase):
     def test_all_eight_manual_sources_are_configured_with_links(self):
         cfg = test_config()
         names = {source.name for source in configured_sources(cfg)}
-        self.assertEqual(names, set(MANUAL_ONLY_SOURCES))
+        self.assertEqual(names, set(DEFAULT_LINK_OUT_SOURCES))
         self.assertEqual(len(names), 8)
         for source in configured_sources(cfg):
             self.assertTrue(source.search_url.startswith("https://"), source.name)
@@ -37,7 +37,7 @@ class LinkOutConfigTests(unittest.TestCase):
 
         # LinkedIn is the one documented exception: an optional, read-only
         # best-effort listing reader that never authenticates or applies.
-        overlap = set(ADAPTERS) & set(MANUAL_ONLY_SOURCES)
+        overlap = set(ADAPTERS) & set(DEFAULT_LINK_OUT_SOURCES)
         self.assertEqual(overlap, {"linkedin"})
 
     def test_config_can_override_a_search_url_and_disable_one(self):
