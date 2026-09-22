@@ -111,11 +111,12 @@ def cmd_link_out(args) -> int:
         return 0
 
     if args.link_command == "add":
-        description = args.description or ""
-        if args.description_file:
-            description = Path(args.description_file).read_text(encoding="utf-8")
         try:
+            description = args.description or ""
+            if args.description_file:
+                description = Path(args.description_file).read_text(encoding="utf-8")
             posting = build_manual_posting(
+                config,
                 source=args.source,
                 url=args.url,
                 title=args.title,
@@ -127,7 +128,7 @@ def cmd_link_out(args) -> int:
                 apply_url=args.apply_url,
                 published_at=args.published_at,
             )
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
         result = run_manual_pipeline(config, posting, dry_run=args.dry_run)

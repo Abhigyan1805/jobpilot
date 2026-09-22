@@ -58,7 +58,7 @@ class Applier:
         # Wellfound, HiringCafe, a16z, Peak XV, Remote.co) is likewise review-only.
         # Their terms forbid automation, so jobpilot prepares the packet and the
         # human submits; a manual route is a human decision and never dedupes away.
-        if is_manual_source(posting.source):
+        if is_manual_source(self.config, posting.source):
             plan.requires_review = True
             self._add_reason(
                 plan,

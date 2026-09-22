@@ -18,13 +18,18 @@ from __future__ import annotations
 
 import hashlib
 
-from jobpilot.config import Config, LinkOutSource, MANUAL_ONLY_SOURCES
+from jobpilot.config import Config, LinkOutSource
 from jobpilot.models import JobPosting
 
 
-def is_manual_source(source: str) -> bool:
-    """Whether a source is manual-only (link-out, never automated)."""
-    return (source or "") in MANUAL_ONLY_SOURCES
+def is_manual_source(config: Config, source: str) -> bool:
+    """Whether a source is manual-only (link-out, never automated).
+
+    Membership follows the loaded configuration, so a source the user adds
+    under ``[link_out.sources.<name>]`` is manual-only end to end. The built-in
+    defaults are always present in the default config.
+    """
+    return (source or "") in config.link_out.sources
 
 
 def configured_sources(config: Config) -> list[LinkOutSource]:
@@ -34,16 +39,13 @@ def configured_sources(config: Config) -> list[LinkOutSource]:
     return [source for source in config.link_out.sources.values() if source.enabled]
 
 
-def get_source(config: Config, name: str) -> LinkOutSource | None:
-    return config.link_out.sources.get(name)
-
-
 def _stable_job_id(url: str) -> str:
     digest = hashlib.sha1((url or "").strip().encode("utf-8")).hexdigest()[:16]
     return f"manual-{digest}"
 
 
 def build_manual_posting(
+    config: Config,
     *,
     source: str,
     url: str,
@@ -58,15 +60,15 @@ def build_manual_posting(
 ) -> JobPosting:
     """Build a posting a human found on a manual-only source.
 
-    The source must be one of :data:`jobpilot.config.MANUAL_ONLY_SOURCES`; the
-    direct posting URL is required so the review packet can carry it. When no
-    job id is supplied, a stable id is derived from the URL so re-adding the
+    The source must be one of the link-out sources in the loaded configuration;
+    the direct posting URL is required so the review packet can carry it. When
+    no job id is supplied, a stable id is derived from the URL so re-adding the
     same posting dedupes instead of queueing twice.
     """
-    if not is_manual_source(source):
+    if not is_manual_source(config, source):
         raise ValueError(
             f"{source!r} is not a manual-only link-out source; expected one of "
-            f"{', '.join(sorted(MANUAL_ONLY_SOURCES))}"
+            f"{', '.join(sorted(config.link_out.sources))}"
         )
     if not (url or "").strip():
         raise ValueError("a direct posting URL is required to add a manual posting")

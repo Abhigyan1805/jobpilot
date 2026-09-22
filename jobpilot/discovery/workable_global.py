@@ -32,8 +32,6 @@ SEARCH_URL = "https://jobs.workable.com/api/v1/jobs"
 class WorkableGlobalAdapter(SourceAdapter):
     name = "workable_global"
     requires_tokens = False
-    #: The global API's employmentType is not a dependable intern signal.
-    intern_only_default = False
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []
@@ -56,8 +54,7 @@ class WorkableGlobalAdapter(SourceAdapter):
             if not jobs:
                 break
             for job in jobs:
-                if self.keep_intern(job.get("employmentType")):
-                    postings.append(self._normalise(job))
+                postings.append(self._normalise(job))
             token = str(data.get("nextPageToken") or "")
             if not token:
                 break

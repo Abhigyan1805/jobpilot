@@ -58,31 +58,36 @@ class LinkOutConfigTests(unittest.TestCase):
             self.assertNotIn("naukri", {s.name for s in configured_sources(cfg)})
 
     def test_is_manual_source(self):
-        self.assertTrue(is_manual_source("internshala"))
-        self.assertFalse(is_manual_source("greenhouse"))
-        self.assertFalse(is_manual_source(""))
+        cfg = test_config()
+        self.assertTrue(is_manual_source(cfg, "internshala"))
+        self.assertFalse(is_manual_source(cfg, "greenhouse"))
+        self.assertFalse(is_manual_source(cfg, ""))
 
 
 class BuildManualPostingTests(unittest.TestCase):
     def test_rejects_non_manual_source(self):
         with self.assertRaises(ValueError):
-            build_manual_posting(source="greenhouse", url="https://x/1", title="Intern", company="A")
+            build_manual_posting(test_config(), source="greenhouse", url="https://x/1", title="Intern", company="A")
 
     def test_requires_url_and_title(self):
+        cfg = test_config()
         with self.assertRaises(ValueError):
-            build_manual_posting(source="internshala", url="", title="Intern", company="A")
+            build_manual_posting(cfg, source="internshala", url="", title="Intern", company="A")
         with self.assertRaises(ValueError):
-            build_manual_posting(source="internshala", url="https://x/1", title="", company="A")
+            build_manual_posting(cfg, source="internshala", url="https://x/1", title="", company="A")
 
     def test_stable_id_is_derived_from_url_so_re_adds_dedupe(self):
-        first = build_manual_posting(source="peakxv", url="https://x/1", title="Intern", company="A")
-        second = build_manual_posting(source="peakxv", url="https://x/1", title="Intern", company="A")
+        cfg = test_config()
+        first = build_manual_posting(cfg, source="peakxv", url="https://x/1", title="Intern", company="A")
+        second = build_manual_posting(cfg, source="peakxv", url="https://x/1", title="Intern", company="A")
         self.assertEqual(first.stable_id, second.stable_id)
         self.assertTrue(first.stable_id.startswith("peakxv:manual-"))
         self.assertEqual(first.apply_url, "https://x/1")
 
     def test_explicit_job_id_is_respected(self):
-        p = build_manual_posting(source="wellfound", url="https://x/2", title="Intern", company="A", job_id="abc")
+        p = build_manual_posting(
+            test_config(), source="wellfound", url="https://x/2", title="Intern", company="A", job_id="abc"
+        )
         self.assertEqual(p.job_id, "abc")
 
 
@@ -162,6 +167,7 @@ class ManualPipelineTests(unittest.TestCase):
 
     def test_manual_posting_is_matched_tailored_and_queued_for_review(self):
         p = build_manual_posting(
+            self.cfg,
             source="internshala",
             url="https://internshala.com/internship/ml-intern",
             title="Machine Learning Intern",
@@ -195,6 +201,7 @@ class ManualPipelineTests(unittest.TestCase):
 
     def test_out_of_window_manual_posting_is_rejected_not_queued(self):
         p = build_manual_posting(
+            self.cfg,
             source="naukri",
             url="https://naukri.com/job/1",
             title="Machine Learning Intern",
@@ -288,6 +295,91 @@ class LinkOutCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not a manual-only", errors.getvalue())
         run.assert_not_called()
+
+
+class UserAddedLinkOutSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config_path = Path(self.tmp.name) / "config.toml"
+        self.config_path.write_text(
+            "[profile]\n"
+            f'path = "{MINI_PROFILE}"\n'
+            "[output]\n"
+            f'dir = "{self.tmp.name}/out"\n'
+            f'database = "{self.tmp.name}/jobpilot.db"\n'
+            "[link_out]\nenabled = true\n"
+            "[link_out.sources.customboard]\n"
+            'label = "Custom Board"\n'
+            'search_url = "https://customboard.example/jobs"\n'
+            'terms_note = "Terms forbid automation; link-out only."\n',
+            encoding="utf-8",
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_user_added_source_is_listed_and_recognised_as_manual(self):
+        cfg = load_config(self.config_path)
+        self.assertIn("customboard", {s.name for s in configured_sources(cfg)})
+        self.assertTrue(is_manual_source(cfg, "customboard"))
+        p = build_manual_posting(
+            cfg,
+            source="customboard",
+            url="https://customboard.example/jobs/1",
+            title="Machine Learning Intern",
+            company="Aurora",
+        )
+        self.assertEqual(p.source, "customboard")
+
+    def test_user_added_source_is_accepted_by_cli_add(self):
+        fake = PipelineResult(
+            stats={
+                "review_id": 3,
+                "packet_dir": "/tmp/packet",
+                "apply_url": "https://customboard.example/jobs/1",
+                "queued": 1,
+            }
+        )
+        buffer = io.StringIO()
+        with mock.patch("jobpilot.cli.run_manual_pipeline", return_value=fake) as run, redirect_stdout(buffer):
+            code = main(
+                [
+                    "--config",
+                    str(self.config_path),
+                    "link-out",
+                    "add",
+                    "--source",
+                    "customboard",
+                    "--url",
+                    "https://customboard.example/jobs/1",
+                    "--title",
+                    "ML Intern",
+                    "--company",
+                    "Aurora",
+                ]
+            )
+        self.assertEqual(code, 0)
+        run.assert_called_once()
+
+    def test_user_added_source_postings_route_to_review(self):
+        cfg = load_config(self.config_path)
+        store = Store(":memory:")
+        try:
+            adapter = FakeAdapter(cfg)
+            applier = Applier(store, cfg, adapter, cfg.output.dir)
+            p = posting(
+                source="customboard",
+                job_id="c1",
+                description=IN_WINDOW,
+                apply_url="https://customboard.example/jobs/1",
+            )
+            outcome = applier.process(plan_for(p))
+            self.assertEqual(outcome.action, "review")
+            self.assertEqual(outcome.status, "manual_review")
+            self.assertEqual(adapter.calls, [])
+            self.assertFalse(store.has_submitted(p.stable_id))
+        finally:
+            store.close()
 
 
 if __name__ == "__main__":

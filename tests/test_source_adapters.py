@@ -1,4 +1,4 @@
-"""Tests for the widened discovery adapters and their typed internship filters.
+"""Tests for the widened discovery adapters and the typed fields they carry.
 
 No network: every adapter's ``fetch_json`` is patched with a captured fixture so
 the tests exercise URL construction, pagination and normalisation only.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+from jobpilot.applying.applier import Applier
 from jobpilot.config import Config
 from jobpilot.discovery.ashby import AshbyAdapter
 from jobpilot.discovery.greenhouse import GreenhouseAdapter
@@ -18,8 +19,10 @@ from jobpilot.discovery.themuse import TheMuseAdapter
 from jobpilot.discovery.unstop import UnstopAdapter
 from jobpilot.discovery.workable import WorkableAdapter
 from jobpilot.discovery.workable_global import WorkableGlobalAdapter
+from jobpilot.filtering import review_only_reasons
 from jobpilot.http import FetchError
-from tests.helpers import test_config
+from jobpilot.store import Store
+from tests.helpers import FakeAdapter, plan_for, test_config
 
 
 def _source(cfg: Config, name: str, **options):
@@ -214,8 +217,12 @@ class TheMuseTests(unittest.TestCase):
         self.assertIn("level=Internship", fetch.call_args_list[0].args[0])
 
 
-class TypedInternFilterTests(unittest.TestCase):
-    def test_lever_requests_commitment_and_keeps_only_typed_interns(self):
+class AdapterCoverageTests(unittest.TestCase):
+    """Adapters carry each board's typed employment value but never drop a
+    posting on it; the shared hard filter decides, so a genuine intern a board
+    happens to tag ``FullTime`` is still surfaced and routed to review."""
+
+    def test_lever_carries_typed_commitment_without_dropping(self):
         cfg = test_config()
         source = _source(cfg, "lever")
         source.tokens = ["acme"]
@@ -227,9 +234,10 @@ class TypedInternFilterTests(unittest.TestCase):
         with mock.patch("jobpilot.discovery.lever.fetch_json", return_value=payload) as fetch:
             postings = adapter.fetch()
         self.assertIn("commitment=Intern", fetch.call_args_list[0].args[0])
-        self.assertEqual([p.job_id for p in postings], ["1"])
+        self.assertEqual([p.job_id for p in postings], ["1", "2"])
+        self.assertEqual(postings[1].employment_type, "Fulltime")
 
-    def test_ashby_filters_on_typed_employment_type_not_title(self):
+    def test_ashby_carries_typed_employment_type_without_dropping(self):
         cfg = test_config()
         source = _source(cfg, "ashby")
         source.tokens = ["acme"]
@@ -242,9 +250,10 @@ class TypedInternFilterTests(unittest.TestCase):
         }
         with mock.patch("jobpilot.discovery.ashby.fetch_json", return_value=payload):
             postings = adapter.fetch()
-        self.assertEqual([p.job_id for p in postings], ["1"])
+        self.assertEqual([p.job_id for p in postings], ["1", "2"])
+        self.assertEqual(postings[1].employment_type, "Full Time")
 
-    def test_greenhouse_filters_on_typed_metadata_and_keeps_absent_field(self):
+    def test_greenhouse_keeps_all_rows_and_carries_typed_metadata(self):
         cfg = test_config()
         source = _source(cfg, "greenhouse")
         source.tokens = ["acme"]
@@ -258,9 +267,10 @@ class TypedInternFilterTests(unittest.TestCase):
         }
         with mock.patch("jobpilot.discovery.greenhouse.fetch_json", return_value=payload):
             postings = adapter.fetch()
-        self.assertEqual([p.job_id for p in postings], ["1", "3"])
+        self.assertEqual([p.job_id for p in postings], ["1", "2", "3"])
+        self.assertEqual(postings[1].employment_type, "FullTime")
 
-    def test_workable_widget_filters_on_typed_employment_type(self):
+    def test_workable_widget_carries_typed_employment_type_without_dropping(self):
         cfg = test_config()
         source = _source(cfg, "workable")
         source.tokens = ["acme"]
@@ -275,7 +285,43 @@ class TypedInternFilterTests(unittest.TestCase):
         }
         with mock.patch("jobpilot.discovery.workable.fetch_json", return_value=payload):
             postings = adapter.fetch()
-        self.assertEqual([p.job_id for p in postings], ["a", "c"])
+        self.assertEqual([p.job_id for p in postings], ["a", "b", "c"])
+        self.assertEqual(postings[1].employment_type, "Full-time")
+
+    def test_fulltime_tagged_ml_intern_survives_discovery_and_routes_to_review(self):
+        cfg = test_config()
+        source = _source(cfg, "greenhouse")
+        source.tokens = ["acme"]
+        adapter = GreenhouseAdapter(source, cfg)
+        payload = {
+            "jobs": [
+                {
+                    "id": "7",
+                    "title": "Machine Learning Intern",
+                    "absolute_url": "https://boards.greenhouse.io/acme/jobs/7",
+                    "location": {"name": "Bengaluru, India"},
+                    "content": "<p>Machine learning internship, January 2026 to June 2026. Python, RAG, LLMs.</p>",
+                    "metadata": [{"name": "Employment Type", "value": "FullTime"}],
+                }
+            ]
+        }
+        with mock.patch("jobpilot.discovery.greenhouse.fetch_json", return_value=payload):
+            postings = adapter.fetch()
+        self.assertEqual(len(postings), 1)
+        found = postings[0]
+        self.assertEqual(found.employment_type, "FullTime")
+        self.assertTrue(any("ambiguous" in r for r in review_only_reasons(found, cfg.filter)))
+
+        store = Store(":memory:")
+        try:
+            applier = Applier(store, cfg, FakeAdapter(cfg), cfg.output.dir)
+            outcome = applier.process(plan_for(found))
+            submitted = store.has_submitted(found.stable_id)
+        finally:
+            store.close()
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertFalse(submitted)
 
 
 if __name__ == "__main__":

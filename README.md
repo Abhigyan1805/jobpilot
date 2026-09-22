@@ -237,23 +237,25 @@ the sections and keywords survive, then reports keyword gaps honestly.
 
 All automated sources are read-only and unauthenticated. Source failures are
 isolated and reported; the rest of the run continues. Internship status is
-taken from each board's own **typed field** where it exists (`commitment=Intern`
-on Lever, `employmentType` on Ashby, `employment_type` on Workable, Greenhouse's
-employment-type metadata, `level=Internship` on The Muse, `employment_type=Intern`
-on Himalayas); a title alone is never used to infer it. Where a source exposes no
-typed field, the posting is kept and the shared hard filter decides.
+carried from each board's own **typed field** where it exists (`commitment` on
+Lever, `employmentType` on Ashby, `employment_type` on Workable, Greenhouse's
+employment-type metadata, `level` on The Muse, `employment_type` on Himalayas),
+and a title alone is never used to invent it. Adapters never drop a posting on
+its typed value: every posting reaches the shared hard filter, which keeps a
+genuine intern that a board tagged with a generic value like `FullTime` and
+routes it to human review instead of discarding it.
 
 | Source | Endpoint | Limitations |
 | --- | --- | --- |
-| **Greenhouse** | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Undocumented public endpoint; may change shape or rate-limit; only boards whose token you configure. Drops postings whose typed employment type is clearly not an internship; keeps those with no typed field. |
-| **Lever** | `api.lever.co/v0/postings/{token}?mode=json&commitment=Intern` | Documented `commitment=Intern` filter (case-sensitive); only boards whose token you configure. |
-| **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; keeps only jobs whose typed `employmentType` is `Intern`; only configured tokens. |
-| **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Drops rows whose typed `employment_type` is clearly not an internship. |
+| **Greenhouse** | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Undocumented public endpoint; may change shape or rate-limit; only boards whose token you configure. Carries each job's typed employment-type metadata for the shared filter; never drops on it. |
+| **Lever** | `api.lever.co/v0/postings/{token}?mode=json&commitment=Intern` | Documented `commitment` field (case-sensitive); the adapter requests `commitment=Intern` as a search scope and carries each job's typed `commitment` for the shared filter. Only boards whose token you configure. |
+| **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; carries each job's typed `employmentType` for the shared filter; never drops on it. Only configured tokens. |
+| **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Carries each row's typed `employment_type` for the shared filter; never drops on it. |
 | **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` | Free, no key; integer `page` pagination (20/page). Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
 | **Unstop** | `unstop.com/api/public/opportunity/search-result?opportunity=internships&page=N` | India-native live internship feed (~10,000 rows); its `robots.txt` explicitly allows `/api/public/*`. 10/page. Typed `start_date`/`end_date` are mapped into the window check; a lone date is left as "unknown window" (review-only). |
 | **Workable** (global search) | `jobs.workable.com/api/v1/jobs?query=intern&location=India` | **Undocumented** cross-company search; paginates with an opaque `pageToken`. `robots.txt` sets `ai-train=no` (data must not be used for model training). Its `employmentType` is unreliable, so it relies on Workable's own server-side `query=intern` search. |
 | **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
-| **LinkedIn** (optional, disabled by default) | public guest job-search HTML | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** Never logs in, never authenticates, never applies, low rate, degrades gracefully. Never auto-submitted. |
+| **LinkedIn** (optional reader, disabled by default) | public guest job-search HTML | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** An off-by-default, captain-authorized exception: link-out is the default LinkedIn path. Never logs in, never authenticates, never applies, low rate, degrades gracefully. Never auto-submitted. |
 
 ### Link-out sources (manual only, never scraped)
 
@@ -268,7 +270,20 @@ python -m jobpilot --config config.toml link-out list
 
 This prints a configured saved-search link per source - Internshala, Naukri,
 LinkedIn, Wellfound, HiringCafe, a16z Portfolio Jobs, Peak XV and Remote.co - with
-a one-line note on why each is manual. **Internshala matters most**: its listings
+a one-line note on why each is manual. Link-out is the **default** path for every
+one of these sources, LinkedIn included. Internshala, Naukri, Wellfound,
+HiringCafe, a16z, Peak XV and Remote.co have **no automated reader at all**: their
+terms forbid automation, so they are link-out only.
+
+LinkedIn is the single, deliberate, off-by-default exception: alongside its
+link-out channel, the optional read-only listing reader can be enabled under
+`[linkedin]`. It is never authenticated, never logged in, never applies, runs at
+a low rate, is against LinkedIn's terms, is best-effort, and may stop working at
+any time. It is not the default LinkedIn path and it is not a licence to scrape
+any other manual-only source. Its postings, like every link-out posting, remain
+review-only: prepared and queued, never auto-submitted.
+
+**Internshala matters most**: its listings
 carry explicit start windows ("can start the internship between 13th Jan'26 and
 17th Feb'26") and it has the largest AI/ML internship inventory in India, but its
 terms expressly prohibit automated extraction. When you find a posting there, add

@@ -35,9 +35,6 @@ class LeverAdapter(SourceAdapter):
                 errors.append(f"{token}: unexpected response shape")
                 continue
             for job in data:
-                commitment_value = (job.get("categories") or {}).get("commitment", "") or ""
-                if not self.keep_intern(commitment_value):
-                    continue
                 postings.append(self._normalise(token, job))
         if not postings and errors:
             raise FetchError("; ".join(errors))

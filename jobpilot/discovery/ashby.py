@@ -27,10 +27,6 @@ class AshbyAdapter(SourceAdapter):
             for job in jobs:
                 if job.get("isListed") is False:
                     continue
-                # Ashby's typed employmentType enum is reliable; use it rather
-                # than inferring internship status from the title.
-                if not self.keep_intern(job.get("employmentType")):
-                    continue
                 postings.append(self._normalise(token, job))
         if not postings and errors:
             raise FetchError("; ".join(errors))
