@@ -40,6 +40,8 @@ def extract_pdf_text(pdf_path: str, extractor: str, *, timeout: int = 60) -> str
             capture_output=True,
             timeout=timeout,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except FileNotFoundError as exc:
         raise TextExtractionError(f"text extractor not found: {extractor}") from exc

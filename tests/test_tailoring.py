@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,18 @@ class ExtractPdfTextInvocationTests(unittest.TestCase):
         with mock.patch("jobpilot.resume.parseability.subprocess.run", return_value=completed):
             with self.assertRaises(TextExtractionError):
                 extract_pdf_text(str(self.pdf), "pdftotext")
+
+    @unittest.skipUnless(os.name == "posix", "fake extractor requires a POSIX executable")
+    def test_non_utf8_output_is_replaced_not_raised(self):
+        extractor = Path(self.tmp.name) / "fake_extractor"
+        extractor.write_text(
+            f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write(b'caf\\xe9\\n')\n"
+        )
+        extractor.chmod(0o755)
+
+        text = extract_pdf_text(str(self.pdf), str(extractor))
+
+        self.assertEqual(text, "caf\ufffd\n")
 
 
 @unittest.skipUnless(_HAS_TOOLCHAIN, "real LaTeX toolchain not available")
