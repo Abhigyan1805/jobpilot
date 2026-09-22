@@ -7,7 +7,7 @@ from jobpilot.htmlutil import html_to_text
 from jobpilot.http import FetchError, fetch_json
 from jobpilot.models import JobPosting
 
-BOARD_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
+POSTINGS_URL = "https://api.lever.co/v0/postings/{token}"
 
 
 class LeverAdapter(SourceAdapter):
@@ -17,7 +17,7 @@ class LeverAdapter(SourceAdapter):
         postings: list[JobPosting] = []
         errors: list[str] = []
         for token in self.tokens:
-            url = BOARD_URL.format(token=token)
+            url = f"{POSTINGS_URL.format(token=token)}?mode=json"
             try:
                 data = fetch_json(url, timeout=float(self.option("timeout", 20)))
             except FetchError as exc:

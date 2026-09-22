@@ -51,6 +51,16 @@ SEASON_MONTHS = {
 NUMERIC_RANGE_RE = re.compile(
     r"\b(?P<m1>0?[1-9]|1[0-2])\s*/\s*(?P<y1>\d{4})?\s*(?:-|–|—|to)\s*(?P<m2>0?[1-9]|1[0-2])\s*/\s*(?P<y2>\d{4})\b"
 )
+# ISO date ranges such as "2026-01-15 - 2026-06-30", used by sources (Unstop)
+# that expose a typed start/end date pair. Only a genuine pair is meaningful: a
+# lone ISO date is deliberately not treated as a timing signal, because a posted
+# or deadline date would otherwise hard-reject an in-window internship.
+ISO_RANGE_RE = re.compile(
+    r"\b(?P<y1>(?:19|20)\d{2})-(?P<m1>0[1-9]|1[0-2])-\d{2}"
+    r"\s*(?:-|–|—|to|through|until|till)\s*"
+    r"(?P<y2>(?:19|20)\d{2})-(?P<m2>0[1-9]|1[0-2])-\d{2}\b",
+    re.IGNORECASE,
+)
 YEAR_TOKEN_RE = re.compile(r"^(?:19|20)\d{2}$")
 # Season words only count when they sit next to internship/term context (or a
 # year) so that product/technology names such as "Spring Boot" cannot corrupt
@@ -66,6 +76,43 @@ SPRING_TECH_SUFFIXES = {
     "boot", "cloud", "framework", "security", "mvc", "batch", "webflux",
     "jpa", "graphql", "actuator", "data",
 }
+# Nouns that name the internship/term window itself. An ISO date pair is only
+# the posting's own window when its clause is anchored to one of these (or to a
+# month/season name). A bare start verb ("starts", "begins") is deliberately
+# *not* an anchor: the subject of the clause decides, never a verb inside it.
+WINDOW_SUBJECTS = {
+    "intern", "interns", "internship", "internships",
+    "coop", "co-op", "cooperative", "trainee", "trainees",
+    "placement", "placements", "term", "terms",
+    "semester", "semesters", "session", "sessions",
+    "program", "programme", "programs", "programmes",
+    "duration", "week", "weeks", "month", "months",
+    "join", "joining",
+    "summer", "winter", "spring", "autumn", "fall", "monsoon",
+    *(m for m in MONTHS if m not in {"may", "mar"}),
+}
+# Nouns that name the application/hiring/review process rather than the
+# internship. When the pair's own clause is about the process, the pair is never
+# a verified window whatever start verb it carries, so the window stays unknown
+# and the posting is surfaced for review instead of rejected or auto-applied.
+# This keys on the clause subject, so it also replaces the old exact-phrase
+# deadline vetoes that a generic start verb could slip past.
+PROCESS_SUBJECTS = {
+    "application", "applications", "applicant", "applicants",
+    "apply", "applying", "applies", "applied",
+    "submission", "submissions", "submit", "submitting", "submitted",
+    "registration", "register", "registering",
+    "deadline", "deadlines",
+    "hiring", "hire", "hired",
+    "interview", "interviews", "interviewing",
+    "review", "reviews", "reviewing",
+    "offer", "offers", "onboarding",
+    "recruit", "recruiting", "recruitment",
+    "screening", "selection", "shortlist", "shortlisted",
+    "decision", "decisions",
+}
+# Clause terminators bound how far a subject test reaches around a date pair.
+_CLAUSE_BREAKS = ".!?\n;"
 
 
 def _season_has_context(text: str, match: re.Match, season: str) -> bool:
@@ -78,6 +125,43 @@ def _season_has_context(text: str, match: re.Match, season: str) -> bool:
         if lowered in SEASON_CONTEXT or YEAR_TOKEN_RE.match(lowered):
             return True
     return False
+
+
+def _clause_before(text: str, pos: int) -> str:
+    cut = max(text.rfind(ch, 0, pos) for ch in _CLAUSE_BREAKS)
+    return text[cut + 1: pos]
+
+
+def _clause_after(text: str, pos: int) -> str:
+    stops = [text.find(ch, pos) for ch in _CLAUSE_BREAKS]
+    stops = [stop for stop in stops if stop != -1]
+    return text[pos: min(stops)] if stops else text[pos:]
+
+
+def _range_has_context(text: str, match: re.Match) -> bool:
+    """Whether an ISO date pair is the posting's own window.
+
+    The decision keys on the subject of the pair's own clause, never on a verb
+    inside it:
+
+    * a process-subject clause (application, hiring, interview, review, ...) is
+      never the internship window, so the posting stays "unknown" and is
+      surfaced for review rather than rejected or auto-applied;
+    * a clause anchored to a genuine window subject (internship, term, month,
+      season, ...) is the window;
+    * a clause with neither subject is unknown.
+
+    ``text`` is the posting's own prose (the description), so an adjacent
+    concatenated field such as ``employment_type`` can never supply the subject.
+    """
+    before = _clause_before(text, match.start())
+    after = _clause_after(text, match.end())
+    tokens = {
+        token.lower() for token in re.findall(r"[A-Za-z0-9-]+", f"{before} {after}")
+    }
+    if tokens & PROCESS_SUBJECTS:
+        return False
+    return bool(tokens & WINDOW_SUBJECTS)
 
 
 @dataclass
@@ -105,10 +189,18 @@ def _label(start: int, end: int, year: str = "") -> str:
     return f"{name(start)}-{name(end)}{(' ' + year) if year else ''}"
 
 
-def classify_window(text: str, cfg) -> WindowInfo:
+def classify_window(text: str, cfg, *, prose: str | None = None) -> WindowInfo:
+    """Classify a posting's timing.
+
+    ``text`` is the searchable text scanned for every signal. ``prose`` is the
+    posting's own description, used for ISO date pairs so that context cannot
+    leak in from a concatenated field such as the employment type; when omitted
+    (direct callers with a plain string) ``text`` stands in for it.
+    """
     if not text:
         return WindowInfo("unknown", 0.0, None, "no text to inspect")
     window = _window_months(cfg)
+    iso_text = text if prose is None else prose
 
     # 1. Explicit month-name ranges (highest confidence).
     for m in RANGE_RE.finditer(text):
@@ -124,14 +216,30 @@ def classify_window(text: str, cfg) -> WindowInfo:
         overlap = bool(months & window)
         return WindowInfo(label, 1.0, overlap, f"explicit range {label}")
 
-    # 2. Numeric month/year ranges such as 01/2026 - 06/2026.
+    # 2. ISO date ranges (e.g. Unstop's typed start_date - end_date). Only a
+    #    pair next to genuine timing words in the description itself counts as
+    #    the posting's window: a bare date pair in prose is an application or
+    #    deadline range, so reading it as the window would wrongly reject (or
+    #    wrongly verify) a posting.
+    for m in ISO_RANGE_RE.finditer(iso_text):
+        if not _range_has_context(iso_text, m):
+            continue
+        m1, m2 = int(m.group("m1")), int(m.group("m2"))
+        if m2 >= m1:
+            months = set(range(m1, m2 + 1))
+        else:
+            months = set(range(m1, 13)) | set(range(1, m2 + 1))
+        label = _label(m1, m2, m.group("y1") or m.group("y2") or "")
+        return WindowInfo(label, 1.0, bool(months & window), f"explicit range {label}")
+
+    # 3. Numeric month/year ranges such as 01/2026 - 06/2026.
     for m in NUMERIC_RANGE_RE.finditer(text):
         m1, m2 = int(m.group("m1")), int(m.group("m2"))
         months = set(range(min(m1, m2), max(m1, m2) + 1))
         label = _label(min(m1, m2), max(m1, m2), m.group("y1") or m.group("y2") or "")
         return WindowInfo(label, 1.0, bool(months & window), f"explicit range {label}")
 
-    # 3. Season words, but only when a nearby internship/term word or year
+    # 4. Season words, but only when a nearby internship/term word or year
     #    confirms the season is really the posting's timing and not a tech name.
     for m in SEASON_RE.finditer(text):
         season = m.group("season").lower()
@@ -146,7 +254,7 @@ def classify_window(text: str, cfg) -> WindowInfo:
         label = f"{season.capitalize()}{(' ' + year) if year else ''}"
         return WindowInfo(label, 0.6, bool(months & window), f"season {label}")
 
-    # 4. A single month-year is weak but usable.
+    # 5. A single month-year is weak but usable.
     singles = list(SINGLE_RE.finditer(text))
     if singles:
         for m in singles:

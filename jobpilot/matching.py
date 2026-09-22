@@ -60,7 +60,7 @@ class Matcher:
         loc = assess_location(posting, cfg=self.config.filter)
         location_fit = loc.score
 
-        win = window_info or classify_window(jd_text, self.config.filter)
+        win = window_info or classify_window(jd_text, self.config.filter, prose=posting.description)
         if win.overlaps is True:
             window_fit = win.confidence
         elif win.overlaps is False:

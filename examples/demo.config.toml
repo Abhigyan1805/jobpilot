@@ -18,7 +18,14 @@ enabled = false
 enabled = false
 [sources.workable]
 enabled = false
-
+[sources.himalayas]
+enabled = false
+[sources.unstop]
+enabled = false
+[sources.workable_global]
+enabled = false
+[sources.themuse]
+enabled = false
 [sources.local]
 enabled = true
 path = "demo_postings.json"

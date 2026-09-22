@@ -2,7 +2,8 @@
 
 Order of guards (all checked before any submission):
 
-1. LinkedIn postings are *never* submitted; they always go to the review queue.
+1. LinkedIn and every other manual-only link-out source are *never* submitted;
+   they always go to the review queue.
 2. A plan flagged during generation is never auto-submitted.
 3. A posting whose Jan-Jun window is unconfirmed is never auto-submitted unless
    ``filter.allow_unknown_window`` is set; it goes to the review queue.
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from jobpilot.applying.base import SubmissionAdapter
 from jobpilot.config import Config
 from jobpilot.filtering import review_only_reasons
+from jobpilot.linkout import is_manual_source
 from jobpilot.models import ApplicationPlan
 from jobpilot.review import queue_plan
 from jobpilot.store import Store
@@ -53,6 +55,18 @@ class Applier:
             self._add_reason(plan, "LinkedIn: discovered and tailored, but never auto-submitted (captain applies)")
             return self._to_review(plan, "linkedin_review", "linkedin")
 
+        # Guard 1a: every other manual-only link-out source (Internshala, Naukri,
+        # Wellfound, HiringCafe, a16z, Peak XV, Remote.co) is likewise review-only.
+        # Their terms forbid automation, so jobpilot prepares the packet and the
+        # human submits; a manual route is a human decision and never dedupes away.
+        if is_manual_source(self.config, posting.source):
+            plan.requires_review = True
+            self._add_reason(
+                plan,
+                f"{posting.source}: manual link-out source; the pipeline prepares the packet and you submit",
+            )
+            return self._to_review(plan, "manual_review", "manual_source")
+
         # Guard 1b: a plan flagged during generation (compile failure,
         # no-invention, unparseable PDF) is never auto-submitted.
         if plan.requires_review:
@@ -62,10 +76,12 @@ class Applier:
 
         # Guard 1c: an unconfirmed Jan-Jun window is never auto-applied unless
         # the user explicitly loosened it. The posting is still scored and
-        # queued for one-click review.
+        # queued for one-click review. A confirmed overlap is required, not
+        # merely a non-None judgement, so an application/deadline range can
+        # never stand in for the internship's own window.
         if not self.config.filter.allow_unknown_window:
-            window = classify_window(posting.searchable_text(), self.config.filter)
-            if window.overlaps is None:
+            window = classify_window(posting.searchable_text(), self.config.filter, prose=posting.description)
+            if window.overlaps is not True:
                 self._add_reason(
                     plan, "Jan-Jun window unconfirmed; review before applying"
                 )

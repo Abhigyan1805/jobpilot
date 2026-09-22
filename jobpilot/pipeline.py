@@ -150,6 +150,113 @@ def run_pipeline(
         store.close()
 
 
+def run_manual_pipeline(
+    config: Config,
+    posting: JobPosting,
+    *,
+    dry_run: bool = False,
+) -> PipelineResult:
+    """Process one posting a human found on a manual-only link-out source.
+
+    Runs the same requirement extraction, matching, tailoring and cover-letter
+    generation as the main pipeline. Because the source is manual-only, the
+    applier always routes it to the review queue: the pipeline prepares a
+    ready-to-apply packet (tailored resume, cover letter and the direct link)
+    and the human submits it.
+    """
+    out_dir = Path(config.resolve(config.output.dir))
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    profile = load_profile(config.resolve(config.profile.path))
+    store = Store(config.resolve(config.output.database))
+    run_id = store.start_run("dry_run" if dry_run else "manual")
+    result = PipelineResult()
+    stats = {
+        "manual": 1,
+        "source": posting.source,
+        "eligible": 0,
+        "shortlisted": 0,
+        "strong": 0,
+        "tailored": 0,
+        "compile_failed": 0,
+        "parseability_failed": 0,
+        "submitted": 0,
+        "queued": 0,
+        "review_id": None,
+        "packet_dir": "",
+        "apply_url": posting.apply_url or posting.url,
+        "dry_run": int(dry_run),
+    }
+    try:
+        matcher = Matcher(profile, config)
+        fr = filter_posting(posting, config.filter)
+        store.upsert_posting(
+            posting,
+            eligible=fr.eligible,
+            window_label=fr.window_label,
+            window_confidence=fr.window_confidence,
+            reject_reasons=fr.reject_reasons,
+        )
+        if not fr.eligible:
+            stats["reject_reasons"] = fr.reject_reasons
+            result.stats = stats
+            store.finish_run(run_id, stats)
+            return result
+
+        match = matcher.match(posting)
+        store.save_match(posting.stable_id, match, eligible=True, reject_reasons=[])
+        stats["eligible"] = 1
+        stats["score"] = round(match.score, 4)
+        stats["band"] = match.band
+        stats["shortlisted"] = 1
+        stats["strong"] = 1 if match.band == "strong" else 0
+        result.shorts = [(posting, match)]
+
+        answers = AnswerBook.load(config.resolve(config.apply.answers_file), profile)
+        adapter = build_adapter(config, answers)
+        applier = Applier(store, config, adapter, str(out_dir))
+        generator = ResumeGenerator(profile, config)
+        cover_gen = CoverLetterGenerator(profile, config)
+
+        plan, outcome = self_contained_tailor_apply(
+            config,
+            posting,
+            match,
+            generator,
+            cover_gen,
+            store,
+            applier,
+            str(out_dir),
+            dry_run=dry_run,
+            do_apply=True,
+        )
+        stats["tailored"] += 1 if plan.resume else 0
+        if plan.resume and not plan.resume.parseability_ok:
+            stats["parseability_failed"] += 1
+        if plan.resume and not plan.resume.pdf_path:
+            stats["compile_failed"] += 1
+        if outcome is not None:
+            result.outcomes.append((posting, outcome))
+            _count_outcome(stats, outcome)
+        row = _find_review(store, posting.stable_id)
+        if row is not None:
+            stats["review_id"] = row["id"]
+            stats["packet_dir"] = row["packet_dir"]
+        stats["queue_pending"] = len(store.list_review("pending"))
+        result.stats = stats
+        store.finish_run(run_id, stats)
+        return result
+    finally:
+        store.close()
+
+
+def _find_review(store: Store, stable_id: str):
+    for row in store.list_review("pending"):
+        if row["stable_id"] == stable_id:
+            return row
+    return None
+
+
 def self_contained_tailor_apply(
     config: Config,
     posting: JobPosting,

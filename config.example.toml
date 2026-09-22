@@ -37,6 +37,51 @@ tokens = ["openai", "ramp"]
 enabled = true
 tokens = ["skillshare"]
 
+# Search-based sources: no tokens, no auth, just the approved public endpoints.
+# Failures are isolated - one source failing never aborts the run.
+
+# Himalayas: global remote board. A typed employment_type=Intern query plus a
+# broader q=intern keyword query are merged (deduped by guid): the typed facet
+# is a precision slice, never the only discovery path.
+[sources.himalayas]
+enabled = true
+max_pages = 1
+# keyword_max_pages = 1
+
+# Unstop: India-native; robots.txt explicitly allows /api/public/*.
+[sources.unstop]
+enabled = true
+max_pages = 2
+
+# Workable's cross-company search (distinct from the per-account widget above).
+# Undocumented endpoint; keep request rates low (robots sets ai-train=no).
+[sources.workable_global]
+enabled = true
+max_pages = 2
+
+# The Muse: free public API. A typed level=Internship query plus a broader
+# location=India query (the API ignores keyword params) are merged and deduped
+# by id, so the typed level facet is never the only discovery path.
+# Note: its location=India parameter is loose; the hard location filter rechecks.
+[sources.themuse]
+enabled = true
+max_pages = 2
+# broad_max_pages = 1
+
+# ---------------------------------------------------------------------------
+# Manual link-out sources. These sites' terms forbid automation (or they block
+# bots), so jobpilot NEVER scrapes or authenticates to them. It surfaces a saved
+# search link, and you can add a posting you found there with
+# `jobpilot link-out add`, after which the normal matching/tailoring runs and a
+# ready-to-apply packet lands in the review queue. Nothing here is auto-applied.
+# Override a search_url below; the defaults live in jobpilot/config.py.
+# ---------------------------------------------------------------------------
+[link_out]
+enabled = true
+
+# [link_out.sources.internshala]
+# search_url = "https://internshala.com/internships/machine-learning-internship"
+
 # Optional, disabled by default. Read-only, never authenticates, never applies.
 # NOTE: reading LinkedIn this way is against their Terms of Service and is
 # best-effort; it may stop working at any time. See README.

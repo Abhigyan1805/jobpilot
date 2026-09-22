@@ -22,6 +22,19 @@ class FetchOutcome:
         return not self.error and not self.skipped
 
 
+def dedupe_postings(postings: list[JobPosting]) -> list[JobPosting]:
+    """Merge posting lists, keeping the first row seen for each source job id."""
+    seen: set[str] = set()
+    merged: list[JobPosting] = []
+    for posting in postings:
+        key = posting.job_id or posting.stable_id
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(posting)
+    return merged
+
+
 class SourceAdapter(ABC):
     """Fetch internship postings from one public source.
 
