@@ -162,7 +162,7 @@ trip a configured target term), and almost all have **no timing signal**, so the
 are review-only by design.
 
 - **Unstop** (the largest India source) yielded **no** AI/ML internship from its
-  generic feed in the 300 rows fetched — see gap G3 below.
+  generic feed in the 300 rows fetched — see gap G4 below.
 - **LinkedIn** yielded **no** AI/ML internship (see §8).
 - **Internshala**, the captain's chosen best source for the Jan–May window, is
   manual-only by design and is set up as a link-out channel (§1).
