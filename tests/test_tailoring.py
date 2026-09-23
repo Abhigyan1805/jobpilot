@@ -7,7 +7,10 @@ from pathlib import Path
 from unittest import mock
 
 from jobpilot.matching import Matcher
-from jobpilot.profile import load_profile
+from jobpilot.models import GeneratedResume, KeywordCoverage, MatchResult
+from jobpilot.lexicon import present_surface_forms
+from jobpilot.pipeline import _run_parseability
+from jobpilot.profile import load_profile, parse_profile_text
 from jobpilot.resume.compiler import compile_tex
 from jobpilot.resume.generator import ResumeGenerator
 from jobpilot.resume.parseability import (
@@ -114,6 +117,43 @@ class TailoringCompileTests(unittest.TestCase):
         profile = load_profile(REAL_PROFILE)
         validator = FactValidator(profile.raw_text)
         self.assertFalse(validator.is_clean("Scaled systems to 999999 users"))
+
+
+class ParseabilitySurfaceFormTests(unittest.TestCase):
+    """Alias-only canonical terms must not fail the PDF parseability check.
+
+    The no-invention generator can only emit words present in the profile, so a
+    canonical term the profile supports only through an alias ("Communication"
+    via "cross-functional") must be checked as that surface form.
+    """
+
+    def test_surface_forms_resolve_an_alias_only_canonical(self):
+        forms = present_surface_forms(["Communication"], "Worked cross-functional with stakeholders.")
+        self.assertIn("cross-functional", forms)
+        self.assertNotEqual(forms, ["Communication"])
+
+    def test_absent_canonical_falls_back_to_its_label(self):
+        self.assertEqual(present_surface_forms(["Communication"], "no related words here"), ["Communication"])
+
+    def test_alias_only_keyword_is_not_reported_unparseable(self):
+        profile = parse_profile_text(
+            "## Experience\n\n"
+            "### ML Intern - Acme\n"
+            "- Worked cross-functional with stakeholders on Python models.\n"
+        )
+        match = MatchResult(
+            score=0.9,
+            band="strong",
+            coverage=KeywordCoverage(matched=["Communication"], missing=[]),
+            missing_keywords=[],
+        )
+        resume = GeneratedResume(pdf_path="/tmp/fake.pdf")
+        with mock.patch(
+            "jobpilot.pipeline.extract_pdf_text",
+            return_value="Education Experience Projects Technical Skills cross-functional",
+        ):
+            _run_parseability(test_config(), resume, match, profile)
+        self.assertTrue(resume.parseability_ok, resume.parseability_detail)
 
 
 if __name__ == "__main__":

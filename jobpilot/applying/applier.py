@@ -91,8 +91,8 @@ class Applier:
         if plan.match.band != "strong":
             self._add_reason(
                 plan,
-                f"score {plan.match.score:.2f} below strong-match threshold "
-                f"{self.config.match.strong_threshold:.2f}",
+                f"band {plan.match.band} (score {plan.match.score:.2f}); "
+                "not the strong auto-apply band",
             )
             return self._to_review(plan, "shortlist_review", "match")
 
@@ -161,13 +161,14 @@ class Applier:
             self.store.update_application(app_id, status="failed", error=result.detail)
         return ApplyOutcome("submit", result.status, result.detail, app_id)
 
-    def _to_review(self, plan: ApplicationPlan, status: str, reason: str) -> ApplyOutcome:
+    def _to_review(self, plan: ApplicationPlan, status: str, category: str) -> ApplyOutcome:
         app_id = self.store.create_application(
             plan,
             status="manual_required",
             mode="review",
             adapter=self.adapter.name,
-            review_reason=reason,
+            review_reason=plan.review_reason or category,
+            review_category=category,
         )
         queue_plan(self.store, plan, self.out_dir)
         return ApplyOutcome("review", status, plan.review_reason, app_id)

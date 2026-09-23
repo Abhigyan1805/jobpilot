@@ -203,6 +203,14 @@ class FilterConfig:
 class MatchConfig:
     shortlist_threshold: float = 0.42
     strong_threshold: float = 0.68
+    # To be auto-apply-eligible (`strong`), a posting's ``role_relevance`` must
+    # reach this minimum. Role relevance is the overlap between the posting's
+    # title/description and the configured ``target_terms`` domains, so this
+    # floor is how the *search target* is enforced: retarget ``target_terms``
+    # for a different search and set the floor accordingly. A posting that
+    # clears ``strong_threshold`` but sits below the floor is capped to
+    # ``shortlist`` (tailored + review-only), never ``strong`` (auto-apply).
+    strong_min_role_relevance: float = 0.5
     weights: dict[str, float] = field(
         default_factory=lambda: {
             "skill_coverage": 0.45,
@@ -217,6 +225,15 @@ class MatchConfig:
             "ai_ml": [
                 "machine learning",
                 "deep learning",
+                "artificial intelligence",
+                "ai engineer",
+                "ai intern",
+                "ai research",
+                "ai scientist",
+                "ai developer",
+                "ai/ml",
+                "ai ml",
+                "applied ai",
                 "llm",
                 "llms",
                 "generative",

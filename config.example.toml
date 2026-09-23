@@ -109,12 +109,26 @@ window_end_month = 6
 [match]
 shortlist_threshold = 0.42       # tailors + queues for review at/above this
 strong_threshold = 0.68          # auto-applies at/above this (where a path exists)
+# Auto-apply (`strong`) additionally requires role relevance >= this floor, so an
+# unrelated internship cannot reach the auto-apply band on location/window alone.
+# Role relevance scores title matches far above body mentions, so company
+# boilerplate cannot establish relevance. Retarget the search by editing
+# [match.target_terms] below (default: AI/ML, software, research).
+strong_min_role_relevance = 0.5
 require_parseable = true
 min_keyword_survival = 0.5
 max_projects = 4
 include_positions = false
 include_non_ai_experience = false
 bold_metrics = true
+
+# The search target. Role relevance is computed as overlap with these domains,
+# with a title hit weighing far more than a body mention. Retargeting the tool
+# means editing these terms and `strong_min_role_relevance` above.
+# [match.target_terms]
+# ai_ml = ["machine learning", "deep learning", "artificial intelligence", "ai engineer", "ai intern", "ai research", "ai scientist", "llm", "generative", "rag", "nlp", "pytorch", "tensorflow", "evaluation", "data science", "forecasting"]
+# software = ["python", "software engineer", "backend", "api", "fastapi", "flask", "sql", "postgres", "data engineer", "docker"]
+# research = ["research", "research scientist", "publication", "benchmark", "experiment"]
 
 [match.weights]
 skill_coverage = 0.45

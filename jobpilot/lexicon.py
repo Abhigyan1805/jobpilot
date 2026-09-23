@@ -130,3 +130,23 @@ def profile_terms(profile) -> list[str]:
     """Canonical terms the master profile genuinely supports."""
     text = " ".join([profile.raw_text, *profile.skill_terms()])
     return extract_terms(text)
+
+
+def present_surface_forms(canonicals: list[str], text: str) -> list[str]:
+    """The label/alias surface forms of ``canonicals`` actually present in ``text``.
+
+    A canonical term can be supported only through an alias: the profile may say
+    "cross-functional" or "collaboration" while the canonical label is
+    "Communication". The no-invention generator can only emit words that are in
+    the profile, so a downstream check (like keyword survival in a compiled PDF)
+    must test the profile-present surface form, never the canonical label.
+    Falls back to the canonical when no known form is present so the check stays
+    honest about a genuinely absent term.
+    """
+    norm = normalize(text)
+    forms: list[str] = []
+    for canonical in canonicals:
+        candidates = [canonical, *LEXICON.get(canonical, [])]
+        present = [c for c in candidates if _compiled(normalize(c)).search(norm)]
+        forms.extend(present or [canonical])
+    return forms
