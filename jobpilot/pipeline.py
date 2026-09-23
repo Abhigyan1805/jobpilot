@@ -340,26 +340,25 @@ def self_contained_tailor_apply(
     return plan, outcome
 
 
-# Deterministic reduction ladder for the one-page fit: layout first (gentle
-# list-spacing tightening), then the least relevant bullets, then whole
-# projects. A variant is accepted only when it both fits the page limit and is
-# still readable (every required section extracts); an aggressive layout that
-# overlaps a heading is rejected and the ladder keeps reducing content instead.
-# Attempts are bounded by ``profile.resume_fit_attempts``.
-_FIT_VARIANTS: tuple[tuple[int, int, int], ...] = (
-    (1, 0, 0),
-    (1, 2, 0),
-    (1, 4, 0),
-    (1, 6, 0),
-    (1, 8, 0),
-    (1, 8, 1),
-    (1, 8, 2),
-    (2, 8, 2),
-    (3, 8, 2),
+# Deterministic reduction ladder for the one-page fit: the least relevant
+# bullets first, then whole projects. A variant is accepted only when it both
+# fits the page limit and is still readable (every required section extracts).
+# Spacing is never tightened: the style template's vertical layout is already
+# calibrated against its default list spacing, so compressing it overlaps entry
+# and section headings and makes the page unreadable. Reduction therefore only
+# removes content. Attempts are bounded by ``profile.resume_fit_attempts``.
+_FIT_VARIANTS: tuple[tuple[int, int], ...] = (
+    (2, 0),
+    (4, 0),
+    (6, 0),
+    (8, 0),
+    (8, 1),
+    (8, 2),
+    (8, 3),
 )
 
 
-def _fit_variant(attempt: int) -> tuple[int, int, int]:
+def _fit_variant(attempt: int) -> tuple[int, int]:
     index = max(0, min(attempt - 1, len(_FIT_VARIANTS) - 1))
     return _FIT_VARIANTS[index]
 
@@ -374,10 +373,10 @@ def _within_page_limit(resume, config: Config) -> bool:
 def _readable(resume, config: Config) -> bool:
     """True when every required section still extracts from the fitted PDF.
 
-    A too-aggressive layout can overlap a section heading with the preceding
-    bullet, which drops the section from the extracted text. Such a variant is
-    not a genuine one-page resume, so the fit loop rejects it and reduces
-    content instead of shipping an unreadable page.
+    A variant that has reduced away a required section is not a genuine resume,
+    so the fit loop rejects it and keeps reducing content instead of shipping an
+    incomplete page. Reduction protects one bullet per entry and at least one
+    project, so this is a safety net rather than the common path.
     """
     sections = list(config.match.required_sections)
     if not sections or not resume.extracted_text:
@@ -398,7 +397,6 @@ def _render_compile_measure(
     generator: ResumeGenerator,
     out_dir: str,
     *,
-    layout_level: int,
     drop_bullets: int,
     drop_projects: int,
 ):
@@ -407,7 +405,6 @@ def _render_compile_measure(
         posting,
         match,
         out_dir,
-        layout_level=layout_level,
         drop_bullets=drop_bullets,
         drop_projects=drop_projects,
     )
@@ -435,31 +432,30 @@ def _generate_and_fit(
 ):
     """Generate a tailored resume and enforce ``profile.resume_page_limit``.
 
-    Returns ``(resume, page_ok)``. The resume is reduced deterministically -
-    tighter LaTeX spacing first, then the least relevant content - and
-    recompiled within a bounded number of attempts. Nothing is ever invented:
-    reduction only removes or re-spaces, and every surviving line still comes
-    verbatim from the profile (the generator validates each variant).
+    Returns ``(resume, page_ok)``. The resume is reduced deterministically - the
+    least relevant content is dropped - and recompiled within a bounded number
+    of attempts. Nothing is ever invented: reduction only removes content, and
+    every surviving line still comes verbatim from the profile (the generator
+    validates each variant).
     """
     limit = int(getattr(config.profile, "resume_page_limit", 0) or 0)
     attempts = int(getattr(config.profile, "resume_fit_attempts", 0) or 0)
 
     resume = _render_compile_measure(
         config, posting, match, generator, out_dir,
-        layout_level=0, drop_bullets=0, drop_projects=0,
+        drop_bullets=0, drop_projects=0,
     )
     resume.page_limit = limit
     if limit <= 0 or (_within_page_limit(resume, config) and _readable(resume, config)):
         return resume, True
 
     used = 0
-    last_good = (0, 0, 0)
+    last_good = (0, 0)
     for attempt in range(1, attempts + 1):
-        layout_level, drop_bullets, drop_projects = _fit_variant(attempt)
+        drop_bullets, drop_projects = _fit_variant(attempt)
         try:
             candidate = _render_compile_measure(
                 config, posting, match, generator, out_dir,
-                layout_level=layout_level,
                 drop_bullets=drop_bullets,
                 drop_projects=drop_projects,
             )
@@ -469,7 +465,7 @@ def _generate_and_fit(
             _rewrite_tex(generator, posting, match, out_dir, last_good)
             break
         used = attempt
-        last_good = (layout_level, drop_bullets, drop_projects)
+        last_good = (drop_bullets, drop_projects)
         candidate.page_limit = limit
         candidate.page_fit_attempts = used
         resume = candidate
@@ -485,15 +481,14 @@ def _rewrite_tex(
     posting: JobPosting,
     match,
     out_dir: str,
-    variant: tuple[int, int, int],
+    variant: tuple[int, int],
 ) -> None:
     """Re-render one variant's ``.tex`` so it matches the resume object kept."""
-    layout_level, drop_bullets, drop_projects = variant
+    drop_bullets, drop_projects = variant
     generator.generate(
         posting,
         match,
         out_dir,
-        layout_level=layout_level,
         drop_bullets=drop_bullets,
         drop_projects=drop_projects,
     )

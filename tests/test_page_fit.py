@@ -9,6 +9,9 @@ fit, it queues the posting with the measured count and flags it on the card.
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,8 +19,9 @@ from unittest import mock
 
 from jobpilot.config import default_config
 from jobpilot.matching import Matcher
-from jobpilot.pipeline import _FIT_VARIANTS, run_manual_pipeline
+from jobpilot.pipeline import _FIT_VARIANTS, _generate_and_fit, run_manual_pipeline
 from jobpilot.present import ReviewCandidate, render_page, select_matches
+from jobpilot.profile import load_profile
 from jobpilot.resume.compiler import CompileError
 from jobpilot.resume.generator import ResumeGenerator
 from jobpilot.resume.parseability import count_pages
@@ -25,6 +29,14 @@ from jobpilot.store import Store
 from tests.helpers import mini_profile, posting, test_config
 
 ML_JD = "Machine learning internship. Python, RAG, LLMs, evaluation."
+
+REAL_PROFILE = "/mnt/d/LaTeX/resume/PROFILE.md"
+REAL_STYLE = "/mnt/d/LaTeX/resume/Abhigyan_Resume_AI_ML.tex"
+REAL_ENGINE = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdflatex.exe"
+REAL_PDFTOTEXT = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdftotext.exe"
+_HAS_TOOLCHAIN = all(
+    os.path.exists(p) for p in (REAL_PROFILE, REAL_STYLE, REAL_ENGINE, REAL_PDFTOTEXT)
+)
 
 
 class CountPagesTests(unittest.TestCase):
@@ -91,19 +103,21 @@ class OnePageEnforcementTests(unittest.TestCase):
         return str(pdf), ""
 
     @staticmethod
-    def _pages_from_tex(pdf_path):
-        # Layout tightening (the "one-page fit" marker) is what makes it fit.
-        tex = Path(pdf_path).with_suffix(".tex").read_text(encoding="utf-8")
-        if "one-page fit" in tex:
+    def _extract_fits_after_reduction():
+        # The full render is two pages; once the ladder drops content it fits.
+        state = {"n": 0}
+
+        def fake_extract(pdf_path, extractor, timeout=60):
+            state["n"] += 1
+            if state["n"] == 1:
+                return "Education Experience Projects Technical Skills\fpage two\f"
             return "Education Experience Projects Technical Skills\f"
-        return "Education Experience Projects Technical Skills\fpage two\f"
+
+        return fake_extract
 
     def test_over_long_resume_is_reduced_to_one_page(self):
-        def fake_extract(pdf_path, extractor, timeout=60):
-            return self._pages_from_tex(pdf_path)
-
         with mock.patch("jobpilot.pipeline.compile_tex", side_effect=self._fake_compile), mock.patch(
-            "jobpilot.pipeline.extract_pdf_text", side_effect=fake_extract
+            "jobpilot.pipeline.extract_pdf_text", side_effect=self._extract_fits_after_reduction()
         ), mock.patch("jobpilot.pipeline.check_parseability", return_value=(True, "ok")):
             run_manual_pipeline(self.cfg, self._posting())
 
@@ -176,7 +190,7 @@ class OnePageEnforcementTests(unittest.TestCase):
             return str(pdf), ""
 
         def fake_extract(pdf_path, extractor, timeout=60):
-            return self._pages_from_tex(pdf_path)
+            return "Education Experience Projects Technical Skills\fpage two\f"
 
         p = self._posting("page-fit-compile-fail")
         with mock.patch("jobpilot.pipeline.compile_tex", side_effect=flaky_compile), mock.patch(
@@ -202,6 +216,85 @@ class OnePageEnforcementTests(unittest.TestCase):
         self.assertGreaterEqual(
             default_config().profile.resume_fit_attempts, len(_FIT_VARIANTS)
         )
+
+
+@unittest.skipUnless(_HAS_TOOLCHAIN, "real LaTeX toolchain not available")
+class FittedResumeReadabilityTests(unittest.TestCase):
+    """A fitted one-page resume must not overlap its headings.
+
+    Compressing the template's already-calibrated list spacing pulled entry
+    headings up into the preceding bullet, so ``pdftotext -layout`` interleaved
+    the heading into the bullet text (e.g. ``AI Content ... forTrainer``). An
+    extra trailing gap after the last project likewise pulled the Technical
+    Skills heading into the final bullet. The fit loop must reach the page limit
+    by dropping content, never by shipping that unreadable layout.
+    """
+
+    HEADINGS = {"Education", "Experience", "Projects", "Technical", "Skills"}
+
+    def _word_boxes(self, pdf_path):
+        pdf = Path(pdf_path)
+        proc = subprocess.run(
+            [REAL_PDFTOTEXT, "-bbox", pdf.name, "-"],
+            cwd=str(pdf.parent),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return [
+            (float(x1), float(y1), float(x2), float(y2), word)
+            for x1, y1, x2, y2, word in re.findall(
+                r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" '
+                r'yMax="([\d.]+)">([^<]*)</word>',
+                proc.stdout,
+            )
+        ]
+
+    def test_fitted_resume_keeps_every_heading_legible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = test_config(Path(tmp))
+            cfg.profile.path = REAL_PROFILE
+            cfg.profile.style_template = REAL_STYLE
+            cfg.profile.pdflatex = REAL_ENGINE
+            cfg.profile.pdftotext = REAL_PDFTOTEXT
+            cfg.profile.resume_page_limit = 1
+
+            profile = load_profile(REAL_PROFILE)
+            gen = ResumeGenerator(profile, cfg)
+            p = posting(
+                company="Polaris Research",
+                title="Machine Learning Intern - LLM Evaluation",
+                description=(
+                    "Summer 2027 internship running January 2027 to June 2027, "
+                    "onsite in Bengaluru. Build LLM and RAG evaluation harnesses "
+                    "in Python; predictive modeling, statistics, SQL, Git, Docker."
+                ),
+            )
+            match = Matcher(profile, cfg).match(p)
+            resume, page_ok = _generate_and_fit(cfg, p, match, gen, tmp)
+
+            self.assertTrue(page_ok)
+            self.assertLessEqual(resume.page_count, 1)
+            flat = " ".join(resume.extracted_text.split())
+            for entry in profile.experiences:
+                self.assertIn(
+                    " ".join(entry.title.split()),
+                    flat,
+                    f"entry heading overlapped into the bullet text: {entry.title!r}",
+                )
+
+            boxes = self._word_boxes(resume.pdf_path)
+            for hx1, hy1, hx2, hy2, heading in boxes:
+                if heading not in self.HEADINGS:
+                    continue
+                for x1, y1, x2, y2, word in boxes:
+                    if word in self.HEADINGS:
+                        continue
+                    overlaps_v = min(hy2, y2) - max(hy1, y1) > 1.0
+                    overlaps_h = min(hx2, x2) - max(hx1, x1) > 1.0
+                    if overlaps_v and overlaps_h:
+                        self.fail(f"heading {heading!r} overlaps {word!r}")
 
 
 class PresentPageBadgeTests(unittest.TestCase):

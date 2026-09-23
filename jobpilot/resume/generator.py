@@ -100,13 +100,11 @@ class ResumeGenerator:
         match: MatchResult,
         out_dir: str,
         *,
-        layout_level: int = 0,
         drop_bullets: int = 0,
         drop_projects: int = 0,
     ) -> GeneratedResume:
         """Render, validate and write one tailored resume.
 
-        ``layout_level`` tightens the LaTeX spacing (0 = baseline) and
         ``drop_bullets`` / ``drop_projects`` remove the least relevant content,
         lowest-relevance first. Reduction never rewrites a fact: the validator
         runs on the reduced content and drops only remove material.
@@ -120,7 +118,7 @@ class ResumeGenerator:
         if violations:
             raise ContentInvariantError(violations)
 
-        tex = self._assemble(preamble, rendered.body, layout_level)
+        tex = self._assemble(preamble, rendered.body)
         job_dir = Path(out_dir) / f"{posting.source}-{slugify(posting.company)}-{slugify(posting.title)}-{posting.job_id}"
         job_dir.mkdir(parents=True, exist_ok=True)
         tex_path = job_dir / "resume.tex"
@@ -387,7 +385,12 @@ class ResumeGenerator:
                 lines.append(f"            \\resumeItem{{{ref['latex']}}}")
                 refs.append(ref)
             lines.append("          \\resumeItemListEnd")
-            lines.append("          \\vspace{-11pt}")
+            if entry_index < len(entries) - 1:
+                # Separate projects only; the trailing gap after the last project
+                # is provided by the list-end spacing below, matching the style
+                # template. An extra gap here pulls the next section heading up
+                # into the final bullet.
+                lines.append("          \\vspace{-11pt}")
         lines.append("    \\resumeSubHeadingListEnd")
         lines.append("\\vspace{-15pt}")
         return "\n".join(lines), refs
@@ -487,45 +490,8 @@ class ResumeGenerator:
         return text
 
     @staticmethod
-    def _assemble(preamble: str, body: str, layout_level: int = 0) -> str:
-        parts = [preamble]
-        tighten = _tighten_block(layout_level)
-        if tighten:
-            parts.append(tighten)
-        parts.append(body)
-        return "\n\n".join(parts) + "\n\n\\end{document}\n"
-
-
-def _tighten_block(layout_level: int) -> str:
-    """LaTeX overrides that compress *list* spacing for the one-page fit.
-
-    The style template's preamble is reused verbatim; these ``\\renewcommand``
-    overrides sit after it and only reduce item separation inside lists (never
-    font size, margins, section gaps or content). List spacing is deliberately
-    the only knob: shrinking the inter-section vertical gaps was observed to
-    make a section heading overlap the preceding bullet, which is unreadable.
-    Level 0 emits nothing.
-    """
-    if layout_level <= 0:
-        return ""
-    level = min(layout_level, 3)
-    itemsep = -1 * level
-    topsep = -0.5 * level
-    return "\n".join(
-        [
-            "% --- one-page fit: tighten list spacing (no content or font change) ---",
-            "\\setlength{\\parskip}{0pt}",
-            "\\setlength{\\parsep}{0pt}",
-            f"\\setlength{{\\itemsep}}{{{itemsep}pt}}",
-            f"\\setlength{{\\topsep}}{{{topsep}pt}}",
-            "\\renewcommand{\\resumeSubHeadingListStart}"
-            f"{{\\begin{{itemize}}[leftmargin=0.0in, label={{}}, itemsep={itemsep}pt, "
-            f"topsep={topsep}pt, parsep=0pt]}}",
-            "\\renewcommand{\\resumeItemListStart}"
-            f"{{\\begin{{itemize}}[itemsep={itemsep}pt, topsep={topsep}pt, parsep=0pt]}}",
-            "% --- end one-page fit ---",
-        ]
-    )
+    def _assemble(preamble: str, body: str) -> str:
+        return "\n\n".join([preamble, body]) + "\n\n\\end{document}\n"
 
 
 def _skill_in_jd(skill: str, jd_text: str, jd_terms: set[str]) -> bool:

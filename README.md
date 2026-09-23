@@ -297,14 +297,15 @@ Additional checks from the recruiter-prompt workflow:
 - **One-page enforcement.** A student resume should be one page, so the pipeline
   measures the compiled PDF's page count deterministically (form feeds in the
   existing `pdftotext` output, no new dependency) and compares it with
-  `profile.resume_page_limit` (default `1`). When over, it reduces and recompiles
-  within `profile.resume_fit_attempts` bounded attempts, in a fixed order:
-  gentle list-spacing tightening first, then the least relevant bullets, then
-  whole projects - relevance being the posting fit the tool already computes.
-  Reduction only removes or re-spaces; every surviving line still comes verbatim
-  from the profile, and a variant whose tightening overlaps a section heading
-  (which would drop the section from the extracted text) is rejected as
-  unreadable rather than shipped. If it still cannot fit, the posting is queued
+  `profile.resume_page_limit` (default `1`). When over, it drops content and
+  recompiles within `profile.resume_fit_attempts` bounded attempts, in a fixed
+  order: the least relevant bullets first, then whole projects - relevance being
+  the posting fit the tool already computes. Spacing is never tightened: the
+  style template's vertical layout is already calibrated, so compressing it
+  overlaps headings and makes the page unreadable. Reduction only removes; every
+  surviving line still comes verbatim from the profile, and a variant that no
+  longer extracts a required section is rejected as unreadable rather than
+  shipped. If it still cannot fit, the posting is queued
   for review with the measured count and the reason, and the `present` card shows
   the page count with a warning badge instead of silently presenting two pages.
   Nothing is ever invented, inflated or rewritten to make it fit.

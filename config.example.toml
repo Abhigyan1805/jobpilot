@@ -13,14 +13,14 @@ pdflatex = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdflatex.exe"
 pdftotext = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdftotext.exe"
 compile_timeout = 120
 # A student resume must fit this many pages. The pipeline measures the compiled
-# PDF (form feeds in the pdftotext output) and, when over, reduces
-# deterministically and recompiles within `resume_fit_attempts` bounded
-# attempts: gentle list-spacing tightening first, then the least relevant
-# bullets, then whole projects. Reduction never invents or rewrites a fact, and
-# an aggressive layout that overlaps a section heading is rejected as
-# unreadable. The default covers every rung of the reduction ladder; lower it
-# to bound compile cost on slow engines. If it still cannot fit, the posting is
-# queued for review with the measured count and flagged on the `present` card.
+# PDF (form feeds in the pdftotext output) and, when over, drops the least
+# relevant content deterministically and recompiles within `resume_fit_attempts`
+# bounded attempts: the least relevant bullets first, then whole projects.
+# Reduction never invents or rewrites a fact, and a variant that no longer
+# extracts a required section is rejected as unreadable. The default covers
+# every rung of the reduction ladder; lower it to bound compile cost on slow
+# engines. If it still cannot fit, the posting is queued for review with the
+# measured count and flagged on the `present` card.
 resume_page_limit = 1
 resume_fit_attempts = 9
 
