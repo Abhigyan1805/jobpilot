@@ -22,6 +22,7 @@ from jobpilot.resume.generator import ContentInvariantError, ResumeGenerator
 from jobpilot.resume.parseability import (
     TextExtractionError,
     check_parseability,
+    count_pages,
     extract_pdf_text,
 )
 from jobpilot.store import Store
@@ -279,19 +280,21 @@ def self_contained_tailor_apply(
 
     # --- tailored resume -------------------------------------------------
     try:
-        resume = generator.generate(posting, match, out_dir)
+        resume, page_ok = _generate_and_fit(config, posting, match, generator, out_dir)
         plan.resume = resume
-        pdf_path, log = compile_tex(
-            resume.tex_path,
-            config.profile.pdflatex,
-            timeout=int(config.profile.compile_timeout),
-        )
-        resume.pdf_path = pdf_path
-        resume.compile_log = log
         _run_parseability(config, resume, match, generator.profile)
         if config.match.require_parseable and not resume.parseability_ok:
             plan.requires_review = True
             plan.review_reason = f"parseability check failed: {resume.parseability_detail}"
+        if not page_ok:
+            # Detected but not reducible to the limit: queue it with the measured
+            # count and the reason, and flag it on the presentation card. Never
+            # silently ship an over-long resume as ready.
+            plan.requires_review = True
+            page_reason = f"resume is {resume.page_count} pages, limit is {resume.page_limit}"
+            plan.review_reason = (
+                plan.review_reason + "; " if plan.review_reason else ""
+            ) + page_reason
     except CompileError as exc:
         plan.requires_review = True
         plan.review_reason = f"LaTeX compilation failed: {exc}"
@@ -331,6 +334,142 @@ def self_contained_tailor_apply(
     return plan, outcome
 
 
+# Deterministic reduction ladder for the one-page fit: layout first (gentle
+# list-spacing tightening), then the least relevant bullets, then whole
+# projects. A variant is accepted only when it both fits the page limit and is
+# still readable (every required section extracts); an aggressive layout that
+# overlaps a heading is rejected and the ladder keeps reducing content instead.
+# Attempts are bounded by ``profile.resume_fit_attempts``.
+_FIT_VARIANTS: tuple[tuple[int, int, int], ...] = (
+    (1, 0, 0),
+    (1, 2, 0),
+    (1, 4, 0),
+    (1, 6, 0),
+    (1, 8, 0),
+    (1, 8, 1),
+    (1, 8, 2),
+    (2, 8, 2),
+    (3, 8, 2),
+)
+
+
+def _fit_variant(attempt: int) -> tuple[int, int, int]:
+    index = max(0, min(attempt - 1, len(_FIT_VARIANTS) - 1))
+    return _FIT_VARIANTS[index]
+
+
+def _within_page_limit(resume, config: Config) -> bool:
+    limit = int(getattr(config.profile, "resume_page_limit", 0) or 0)
+    if limit <= 0 or resume.page_count <= 0:
+        return True
+    return resume.page_count <= limit
+
+
+def _readable(resume, config: Config) -> bool:
+    """True when every required section still extracts from the fitted PDF.
+
+    A too-aggressive layout can overlap a section heading with the preceding
+    bullet, which drops the section from the extracted text. Such a variant is
+    not a genuine one-page resume, so the fit loop rejects it and reduces
+    content instead of shipping an unreadable page.
+    """
+    sections = list(config.match.required_sections)
+    if not sections or not resume.extracted_text:
+        return True
+    ok, _detail = check_parseability(
+        resume.extracted_text,
+        required_sections=sections,
+        required_keywords=[],
+        min_keyword_survival=0.0,
+    )
+    return ok
+
+
+def _render_compile_measure(
+    config: Config,
+    posting: JobPosting,
+    match,
+    generator: ResumeGenerator,
+    out_dir: str,
+    *,
+    layout_level: int,
+    drop_bullets: int,
+    drop_projects: int,
+):
+    """Render one variant, compile it and measure its page count."""
+    resume = generator.generate(
+        posting,
+        match,
+        out_dir,
+        layout_level=layout_level,
+        drop_bullets=drop_bullets,
+        drop_projects=drop_projects,
+    )
+    pdf_path, log = compile_tex(
+        resume.tex_path,
+        config.profile.pdflatex,
+        timeout=int(config.profile.compile_timeout),
+    )
+    resume.pdf_path = pdf_path
+    resume.compile_log = log
+    try:
+        resume.extracted_text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
+    except TextExtractionError:
+        resume.extracted_text = ""
+    resume.page_count = count_pages(resume.extracted_text)
+    return resume
+
+
+def _generate_and_fit(
+    config: Config,
+    posting: JobPosting,
+    match,
+    generator: ResumeGenerator,
+    out_dir: str,
+):
+    """Generate a tailored resume and enforce ``profile.resume_page_limit``.
+
+    Returns ``(resume, page_ok)``. The resume is reduced deterministically -
+    tighter LaTeX spacing first, then the least relevant content - and
+    recompiled within a bounded number of attempts. Nothing is ever invented:
+    reduction only removes or re-spaces, and every surviving line still comes
+    verbatim from the profile (the generator validates each variant).
+    """
+    limit = int(getattr(config.profile, "resume_page_limit", 0) or 0)
+    attempts = int(getattr(config.profile, "resume_fit_attempts", 0) or 0)
+
+    resume = _render_compile_measure(
+        config, posting, match, generator, out_dir,
+        layout_level=0, drop_bullets=0, drop_projects=0,
+    )
+    resume.page_limit = limit
+    if limit <= 0 or (_within_page_limit(resume, config) and _readable(resume, config)):
+        return resume, True
+
+    used = 0
+    for attempt in range(1, attempts + 1):
+        layout_level, drop_bullets, drop_projects = _fit_variant(attempt)
+        try:
+            candidate = _render_compile_measure(
+                config, posting, match, generator, out_dir,
+                layout_level=layout_level,
+                drop_bullets=drop_bullets,
+                drop_projects=drop_projects,
+            )
+        except CompileError:
+            # A reduction variant failed to compile; keep the last good resume.
+            break
+        used = attempt
+        candidate.page_limit = limit
+        candidate.page_fit_attempts = used
+        resume = candidate
+        if _within_page_limit(resume, config) and _readable(resume, config):
+            return resume, True
+
+    resume.page_fit_attempts = used
+    return resume, _within_page_limit(resume, config)
+
+
 def _run_parseability(config: Config, resume, match, profile) -> None:
     # Test keyword survival against the profile-present surface forms, not the
     # canonical labels: the no-invention generator can only emit words that are
@@ -339,12 +478,14 @@ def _run_parseability(config: Config, resume, match, profile) -> None:
     # alias or a perfectly parseable resume is reported unparseable.
     profile_text = " ".join([profile.raw_text, *profile.skill_terms()])
     required_keywords = present_surface_forms(list(match.coverage.matched), profile_text)
-    try:
-        text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
-    except TextExtractionError as exc:
-        resume.parseability_ok = False
-        resume.parseability_detail = str(exc)
-        return
+    text = getattr(resume, "extracted_text", "")
+    if not text:
+        try:
+            text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
+        except TextExtractionError as exc:
+            resume.parseability_ok = False
+            resume.parseability_detail = str(exc)
+            return
     ok, detail = check_parseability(
         text,
         required_sections=list(config.match.required_sections),

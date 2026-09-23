@@ -161,7 +161,9 @@ review-only, with the reason. A role is auto-apply eligible only when it is in
 the strong band *and* the pipeline queued it for a transient reason (daily cap,
 missing channel or auto-apply config); a strong-band role the pipeline routed to
 review for a blocking reason (for example an unconfirmed window), and every
-link-out, LinkedIn or non-strong-band role, is labelled review-only.
+link-out, LinkedIn or non-strong-band role, is labelled review-only. Each card
+also shows the measured page count of its tailored resume (`Resume: 1-page ✓`,
+or a warning badge when it is over the limit and needs attention).
 
 Selection is deliberately narrow: only genuine technical, software-engineering,
 data and AI/ML roles are shown. Unrelated internships (design, UX,
@@ -292,6 +294,20 @@ Additional checks from the recruiter-prompt workflow:
   suggestions. They are suggestions, never facts, and never alter content. They are
   stored with the application record. (An optional LLM-advisor hook is a documented
   follow-up, not part of v1.)
+- **One-page enforcement.** A student resume should be one page, so the pipeline
+  measures the compiled PDF's page count deterministically (form feeds in the
+  existing `pdftotext` output, no new dependency) and compares it with
+  `profile.resume_page_limit` (default `1`). When over, it reduces and recompiles
+  within `profile.resume_fit_attempts` bounded attempts, in a fixed order:
+  gentle list-spacing tightening first, then the least relevant bullets, then
+  whole projects - relevance being the posting fit the tool already computes.
+  Reduction only removes or re-spaces; every surviving line still comes verbatim
+  from the profile, and a variant whose tightening overlaps a section heading
+  (which would drop the section from the extracted text) is rejected as
+  unreadable rather than shipped. If it still cannot fit, the posting is queued
+  for review with the measured count and the reason, and the `present` card shows
+  the page count with a warning badge instead of silently presenting two pages.
+  Nothing is ever invented, inflated or rewritten to make it fit.
 
 ### A note on "ATS rejects most resumes"
 
@@ -400,9 +416,12 @@ python -m unittest discover -s tests -t .
 Coverage includes filtering, matching (matched vs. gap terms), dedupe, the daily cap,
 guardrails (missing required field, LinkedIn review-only, dry-run), the
 "never invent content" rule, the `present` selection rules (a non-technical
-India-eligible internship is excluded and a technical one is included), and an
-integration test that compiles a tailored resume with the real LaTeX engine and
-asserts the PDF is parseable (skipped when the toolchain is unavailable).
+India-eligible internship is excluded and a technical one is included), the
+one-page fit (an over-long resume is reduced to one page, cutting preserves
+every fact, and the bounded-attempts fallback flags review with the measured
+count), and an integration test that compiles a tailored resume with the real
+LaTeX engine and asserts the PDF is parseable (skipped when the toolchain is
+unavailable).
 
 ## Limitations
 

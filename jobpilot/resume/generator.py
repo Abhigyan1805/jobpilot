@@ -94,15 +94,33 @@ class ResumeGenerator:
         self.template_path = config.resolve(config.profile.style_template)
 
     # ------------------------------------------------------------------ public
-    def generate(self, posting: JobPosting, match: MatchResult, out_dir: str) -> GeneratedResume:
+    def generate(
+        self,
+        posting: JobPosting,
+        match: MatchResult,
+        out_dir: str,
+        *,
+        layout_level: int = 0,
+        drop_bullets: int = 0,
+        drop_projects: int = 0,
+    ) -> GeneratedResume:
+        """Render, validate and write one tailored resume.
+
+        ``layout_level`` tightens the LaTeX spacing (0 = baseline) and
+        ``drop_bullets`` / ``drop_projects`` remove the least relevant content,
+        lowest-relevance first. Reduction never rewrites a fact: the validator
+        runs on the reduced content and drops only remove material.
+        """
         preamble = self._load_preamble()
-        rendered = self.render(posting, match)
+        rendered = self.render(
+            posting, match, drop_bullets=drop_bullets, drop_projects=drop_projects
+        )
 
         violations = self.validate_content(rendered)
         if violations:
             raise ContentInvariantError(violations)
 
-        tex = self._assemble(preamble, rendered.body)
+        tex = self._assemble(preamble, rendered.body, layout_level)
         job_dir = Path(out_dir) / f"{posting.source}-{slugify(posting.company)}-{slugify(posting.title)}-{posting.job_id}"
         job_dir.mkdir(parents=True, exist_ok=True)
         tex_path = job_dir / "resume.tex"
@@ -124,7 +142,14 @@ class ResumeGenerator:
         return violations
 
     # ---------------------------------------------------------------- rendering
-    def render(self, posting: JobPosting, match: MatchResult) -> RenderedResume:
+    def render(
+        self,
+        posting: JobPosting,
+        match: MatchResult,
+        *,
+        drop_bullets: int = 0,
+        drop_projects: int = 0,
+    ) -> RenderedResume:
         jd_text = posting.searchable_text()
         jd_terms = set(extract_terms(jd_text))
         jd_vocab = set(content_tokens(jd_text))
@@ -143,22 +168,33 @@ class ResumeGenerator:
             provenance.extend(refs)
 
         experiences = self._select_experiences(jd_terms, jd_vocab)
+        projects = self._select_projects(jd_terms, jd_vocab)
+        if drop_projects > 0:
+            # Keep at least one project so the required Projects section survives.
+            projects = projects[: max(1, len(projects) - drop_projects)]
+        positions = self._select_positions(jd_terms, jd_vocab)
+        drop_keys = (
+            self._lowest_relevance_bullet_keys(
+                experiences, projects, positions, jd_terms, jd_vocab, drop_bullets
+            )
+            if drop_bullets > 0
+            else set()
+        )
+
         if experiences:
-            body, refs = self._render_experiences(experiences, jd_terms, jd_vocab)
+            body, refs = self._render_experiences(experiences, jd_terms, jd_vocab, drop_keys)
             blocks.append(body)
             provenance.extend(refs)
             sections.append(SECTION_EXPERIENCE)
 
-        projects = self._select_projects(jd_terms, jd_vocab)
         if projects:
-            body, refs = self._render_projects(projects, jd_terms, jd_vocab)
+            body, refs = self._render_projects(projects, jd_terms, jd_vocab, drop_keys)
             blocks.append(body)
             provenance.extend(refs)
             sections.append(SECTION_PROJECTS)
 
-        positions = self._select_positions(jd_terms, jd_vocab)
         if positions:
-            body, refs = self._render_positions(positions, jd_terms, jd_vocab)
+            body, refs = self._render_positions(positions, jd_terms, jd_vocab, drop_keys)
             blocks.append(body)
             provenance.extend(refs)
 
@@ -212,6 +248,44 @@ class ResumeGenerator:
             return []
         return list(self.profile.positions)
 
+    def _lowest_relevance_bullet_keys(
+        self,
+        experiences: list[Entry],
+        projects: list[Entry],
+        positions: list[Entry],
+        jd_terms: set[str],
+        jd_vocab: set[str],
+        count: int,
+    ) -> set[tuple[str, int, int]]:
+        """Pick the ``count`` least relevant bullets to drop, deterministically.
+
+        Relevance is the same JD-fit the selection already computes. At least
+        one bullet per entry is protected, so a dropped entry never becomes an
+        empty heading. Ties break on kind, entry index and bullet index so the
+        reduction is reproducible.
+        """
+        by_entry: dict[tuple[str, int], list[tuple[float, int]]] = {}
+        for kind, entries in (
+            ("experience", experiences),
+            ("project", projects),
+            ("position", positions),
+        ):
+            for entry_index, entry in enumerate(entries):
+                for bullet_index, bullet in enumerate(entry.bullets):
+                    rel = self._relevance(bullet, jd_terms, jd_vocab)
+                    by_entry.setdefault((kind, entry_index), []).append((rel, bullet_index))
+
+        droppable: list[tuple[float, str, int, int]] = []
+        for (kind, entry_index), items in by_entry.items():
+            if len(items) <= 1:
+                continue
+            # Protect the most relevant bullet; everything else may be dropped.
+            ranked = sorted(items, key=lambda x: (-x[0], x[1]))
+            for rel, bullet_index in ranked[1:]:
+                droppable.append((rel, kind, entry_index, bullet_index))
+        droppable.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
+        return {(kind, ei, bi) for _rel, kind, ei, bi in droppable[:count]}
+
     # --------------------------------------------------------------- rendering
     def _render_heading(self) -> str:
         c = self.profile.contact
@@ -259,25 +333,37 @@ class ResumeGenerator:
         lines.append("  \\resumeSubHeadingListEnd")
         return "\n".join(lines), []
 
-    def _render_experiences(self, entries: list[Entry], jd_terms: set[str], jd_vocab: set[str]) -> tuple[str, list[dict]]:
+    def _render_experiences(
+        self,
+        entries: list[Entry],
+        jd_terms: set[str],
+        jd_vocab: set[str],
+        drop_keys: set[tuple[str, int, int]],
+    ) -> tuple[str, list[dict]]:
         lines = ["\\section{Experience}", "  \\resumeSubHeadingListStart"]
         refs: list[dict] = []
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             lines.append("    \\resumeSubheading")
             lines.append(f"      {{{latex_escape(entry.title)}}}{{{latex_escape(entry.dates)}}}")
             lines.append(f"      {{{latex_escape(entry.org)}}}{{{latex_escape(entry.location)}}}")
             lines.append("      \\resumeItemListStart")
-            for ref in self._bullet_refs(entry, "experience", jd_terms, jd_vocab):
+            for ref in self._bullet_refs(entry, "experience", entry_index, jd_terms, jd_vocab, drop_keys):
                 lines.append(f"        \\resumeItem{{{ref['latex']}}}")
                 refs.append(ref)
             lines.append("      \\resumeItemListEnd")
         lines.append("  \\resumeSubHeadingListEnd")
         return "\n".join(lines), refs
 
-    def _render_projects(self, entries: list[Entry], jd_terms: set[str], jd_vocab: set[str]) -> tuple[str, list[dict]]:
+    def _render_projects(
+        self,
+        entries: list[Entry],
+        jd_terms: set[str],
+        jd_vocab: set[str],
+        drop_keys: set[tuple[str, int, int]],
+    ) -> tuple[str, list[dict]]:
         lines = ["\\section{" + SECTION_PROJECTS + "}", "    \\vspace{-5pt}", "    \\resumeSubHeadingListStart"]
         refs: list[dict] = []
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             url = ""
             for link in entry.links:
                 m = re.search(r"(https?://\S+|github\.com/\S+)", link)
@@ -297,7 +383,7 @@ class ResumeGenerator:
             lines.append("      \\resumeProjectHeading")
             lines.append(f"          {{{heading}}}{{{year}}}")
             lines.append("          \\resumeItemListStart")
-            for ref in self._bullet_refs(entry, "project", jd_terms, jd_vocab):
+            for ref in self._bullet_refs(entry, "project", entry_index, jd_terms, jd_vocab, drop_keys):
                 lines.append(f"            \\resumeItem{{{ref['latex']}}}")
                 refs.append(ref)
             lines.append("          \\resumeItemListEnd")
@@ -306,15 +392,21 @@ class ResumeGenerator:
         lines.append("\\vspace{-15pt}")
         return "\n".join(lines), refs
 
-    def _render_positions(self, entries: list[Entry], jd_terms: set[str], jd_vocab: set[str]) -> tuple[str, list[dict]]:
+    def _render_positions(
+        self,
+        entries: list[Entry],
+        jd_terms: set[str],
+        jd_vocab: set[str],
+        drop_keys: set[tuple[str, int, int]],
+    ) -> tuple[str, list[dict]]:
         lines = ["\\section{Positions of Responsibility}", "  \\resumeSubHeadingListStart"]
         refs: list[dict] = []
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             lines.append("    \\resumeSubheading")
             lines.append(f"      {{{latex_escape(entry.title)}}}{{{latex_escape(entry.dates)}}}")
             lines.append(f"      {{{latex_escape(entry.org)}}}{{{latex_escape(entry.location)}}}")
             lines.append("      \\resumeItemListStart")
-            for ref in self._bullet_refs(entry, "position", jd_terms, jd_vocab):
+            for ref in self._bullet_refs(entry, "position", entry_index, jd_terms, jd_vocab, drop_keys):
                 lines.append(f"        \\resumeItem{{{ref['latex']}}}")
                 refs.append(ref)
             lines.append("      \\resumeItemListEnd")
@@ -349,9 +441,20 @@ class ResumeGenerator:
         lines.append(" \\vspace{-16pt}")
         return "\n".join(lines)
 
-    def _bullet_refs(self, entry: Entry, kind: str, jd_terms: set[str], jd_vocab: set[str]) -> list[dict]:
+    def _bullet_refs(
+        self,
+        entry: Entry,
+        kind: str,
+        entry_index: int,
+        jd_terms: set[str],
+        jd_vocab: set[str],
+        drop_keys: set[tuple[str, int, int]] | None = None,
+    ) -> list[dict]:
+        drop_keys = drop_keys or set()
         scored = []
         for idx, bullet in enumerate(entry.bullets):
+            if (kind, entry_index, idx) in drop_keys:
+                continue
             rel = self._relevance(bullet, jd_terms, jd_vocab)
             scored.append((rel, idx, bullet))
         scored.sort(key=lambda x: (-x[0], x[1]))
@@ -384,8 +487,45 @@ class ResumeGenerator:
         return text
 
     @staticmethod
-    def _assemble(preamble: str, body: str) -> str:
-        return f"{preamble}\n\n{body}\n\n\\end{{document}}\n"
+    def _assemble(preamble: str, body: str, layout_level: int = 0) -> str:
+        parts = [preamble]
+        tighten = _tighten_block(layout_level)
+        if tighten:
+            parts.append(tighten)
+        parts.append(body)
+        return "\n\n".join(parts) + "\n\n\\end{document}\n"
+
+
+def _tighten_block(layout_level: int) -> str:
+    """LaTeX overrides that compress *list* spacing for the one-page fit.
+
+    The style template's preamble is reused verbatim; these ``\\renewcommand``
+    overrides sit after it and only reduce item separation inside lists (never
+    font size, margins, section gaps or content). List spacing is deliberately
+    the only knob: shrinking the inter-section vertical gaps was observed to
+    make a section heading overlap the preceding bullet, which is unreadable.
+    Level 0 emits nothing.
+    """
+    if layout_level <= 0:
+        return ""
+    level = min(layout_level, 3)
+    itemsep = -1 * level
+    topsep = -0.5 * level
+    return "\n".join(
+        [
+            "% --- one-page fit: tighten list spacing (no content or font change) ---",
+            "\\setlength{\\parskip}{0pt}",
+            "\\setlength{\\parsep}{0pt}",
+            f"\\setlength{{\\itemsep}}{{{itemsep}pt}}",
+            f"\\setlength{{\\topsep}}{{{topsep}pt}}",
+            "\\renewcommand{\\resumeSubHeadingListStart}"
+            f"{{\\begin{{itemize}}[leftmargin=0.0in, label={{}}, itemsep={itemsep}pt, "
+            f"topsep={topsep}pt, parsep=0pt]}}",
+            "\\renewcommand{\\resumeItemListStart}"
+            f"{{\\begin{{itemize}}[itemsep={itemsep}pt, topsep={topsep}pt, parsep=0pt]}}",
+            "% --- end one-page fit ---",
+        ]
+    )
 
 
 def _skill_in_jd(skill: str, jd_text: str, jd_terms: set[str]) -> bool:

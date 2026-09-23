@@ -21,6 +21,13 @@ class ProfileConfig:
     pdflatex: str = "pdflatex"
     pdftotext: str = "pdftotext"
     compile_timeout: int = 120
+    # A student resume must fit this many pages (1 by default). The pipeline
+    # measures the compiled PDF and, when over, reduces deterministically and
+    # recompiles within ``resume_fit_attempts`` bounded attempts. If it still
+    # cannot fit, the posting is queued for review with the measured count and
+    # flagged on the presentation card rather than shipping an over-long resume.
+    resume_page_limit: int = 1
+    resume_fit_attempts: int = 6
 
 
 @dataclass

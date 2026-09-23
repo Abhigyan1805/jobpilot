@@ -57,6 +57,8 @@ class ReviewCandidate:
     window_confidence: float = 0.0
     review_category: str = ""
     review_reason: str = ""
+    page_count: int = 0
+    page_limit: int = 0
 
     @property
     def company(self) -> str:
@@ -161,6 +163,8 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
                 window_confidence=float(posting_row["window_confidence"] or 0.0),
                 review_category=(route_row["review_category"] or "") if route_row else "",
                 review_reason=(route_row["review_reason"] or "") if route_row else "",
+                page_count=int(row["resume_pages"] or 0),
+                page_limit=int(row["resume_page_limit"] or 0),
             )
         )
     return candidates
@@ -371,6 +375,9 @@ h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
   background: var(--chip); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted);
   max-width: 100%; overflow-wrap: anywhere;
 }
+.pagebadge { display: inline-block; border-radius: 999px; padding: 3px 11px; font-size: 12px; margin-top: 10px; }
+.pagebadge.ok { background: var(--good-bg); color: var(--good); }
+.pagebadge.warn { background: var(--bad-bg); color: var(--bad); font-weight: 700; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0; color: var(--muted); font-size: 13px; }
 .meta span { overflow-wrap: anywhere; }
 .meta b { color: var(--ink); font-weight: 600; }
@@ -437,6 +444,19 @@ def _window_evidence(candidate: ReviewCandidate) -> str:
     return label
 
 
+def _page_badge(candidate: ReviewCandidate) -> str:
+    """A visible page-count badge, warning when the resume is over the limit."""
+    if candidate.page_count <= 0 or candidate.page_limit <= 0:
+        return ""
+    if candidate.page_count <= candidate.page_limit:
+        label = "1-page" if candidate.page_count == 1 else f"{candidate.page_count}-page"
+        return f'<span class="pagebadge ok">Resume: {label} \u2713</span>'
+    return (
+        f'<span class="pagebadge warn">Resume is {candidate.page_count} pages, '
+        f"limit is {candidate.page_limit} \u2014 needs attention</span>"
+    )
+
+
 def _tags(values: list[str], kind: str) -> str:
     if not values:
         return '<span class="tag none">none</span>'
@@ -500,6 +520,7 @@ def _render_card(
         <span><b>Technical relevance:</b> {match.technical_relevance:.2f}{_esc(f" ({match.best_domain})" if match.best_domain else "")}</span>
       </div>
       <div class="chips"><span class="chip">{_esc(domains or "no target domains")}</span></div>
+      {_page_badge(c)}
       <div class="skills">
         <div>
           <h3>Matched skills (in the master profile)</h3>

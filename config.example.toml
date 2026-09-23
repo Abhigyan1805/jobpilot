@@ -12,6 +12,16 @@ pdflatex = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdflatex.exe"
 # Text extractor used for the PDF parseability check (ships with the engine).
 pdftotext = "/mnt/d/LaTeX/MiKTeX/miktex/bin/x64/pdftotext.exe"
 compile_timeout = 120
+# A student resume must fit this many pages. The pipeline measures the compiled
+# PDF (form feeds in the pdftotext output) and, when over, reduces
+# deterministically and recompiles within `resume_fit_attempts` bounded
+# attempts: gentle list-spacing tightening first, then the least relevant
+# bullets, then whole projects. Reduction never invents or rewrites a fact, and
+# an aggressive layout that overlaps a section heading is rejected as
+# unreadable. If it still cannot fit, the posting is queued for review with the
+# measured count and flagged on the `present` card.
+resume_page_limit = 1
+resume_fit_attempts = 6
 
 [output]
 dir = "out"

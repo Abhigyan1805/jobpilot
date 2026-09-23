@@ -103,6 +103,21 @@ class GeneratedResume:
     parseability_ok: bool = False
     parseability_detail: str = ""
     compile_log: str = ""
+    # Raw pdftotext output of the final compiled PDF, reused by the
+    # parseability check and the page count so the PDF is extracted once.
+    extracted_text: str = ""
+    # Measured page count of the final compiled PDF, the configured limit, and
+    # how many bounded reduction attempts were used to reach it.
+    page_count: int = 0
+    page_limit: int = 0
+    page_fit_attempts: int = 0
+
+    @property
+    def page_fit_ok(self) -> bool:
+        """True when the measured page count is within the configured limit."""
+        if self.page_limit <= 0 or self.page_count <= 0:
+            return True
+        return self.page_count <= self.page_limit
 
 
 @dataclass
