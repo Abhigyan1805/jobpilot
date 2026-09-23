@@ -46,6 +46,8 @@ class _LinkedInParser(HTMLParser):
         self._depth = 0
         self._card_depth = -1
         self._capture: str | None = None
+        self._capture_tag: str | None = None
+        self._capture_depth = -1
         self._buf: list[str] = []
 
     def handle_starttag(self, tag, attrs):
@@ -61,23 +63,30 @@ class _LinkedInParser(HTMLParser):
             if tag == "a" and "base-card__full-link" in classes and not self._cur["url"]:
                 self._cur["url"] = attrs_d.get("href", "")
             elif tag == "h3" and "base-search-card__title" in classes:
-                self._capture = "title"
+                self._start_capture("title", tag)
             elif tag == "h4" and "base-search-card__subtitle" in classes:
-                self._capture = "company"
+                self._start_capture("company", tag)
             elif (tag == "span" or tag == "div") and "job-search-card__location" in classes:
-                self._capture = "location"
+                self._start_capture("location", tag)
             elif tag == "time":
                 self._cur["posted"] = attrs_d.get("datetime", "")
         if tag not in _VOID_ELEMENTS:
             self._depth += 1
 
+    def _start_capture(self, field, tag):
+        self._capture = field
+        self._capture_tag = tag
+        self._capture_depth = self._depth
+        self._buf = []
+
     def handle_endtag(self, tag):
         if tag in _VOID_ELEMENTS:
             return
         self._depth -= 1
-        if self._capture:
+        if self._capture is not None and tag == self._capture_tag and self._depth == self._capture_depth:
             self._flush()
             self._capture = None
+            self._capture_tag = None
         if self._cur is not None and self._depth == self._card_depth and tag == "div":
             self.cards.append(self._cur)
             self._cur = None

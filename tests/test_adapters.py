@@ -76,6 +76,25 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual([c["job_id"] for c in cards], ["111", "222", "333"])
         self.assertTrue(all("India" in c["location"] for c in cards))
 
+    def test_linkedin_parser_keeps_full_title_with_nested_markup(self):
+        # Regression: a non-void element nested inside the title (e.g. <b>/
+        # <strong> highlighting a matched keyword) must not end the capture
+        # early and drop the rest of the title.
+        markup = """
+        <div class="base-card base-search-card job-search-card"
+             data-entity-urn="urn:li:jobPosting:999">
+          <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/x-999"></a>
+          <h3 class="base-search-card__title">Machine <b>Learning</b> Intern <strong>AI</strong></h3>
+          <h4 class="base-search-card__subtitle">Acme</h4>
+          <span class="job-search-card__location">Bengaluru, India</span>
+        </div>
+        """
+        cards = parse_search_html(markup)
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["title"], "Machine Learning Intern AI")
+        self.assertEqual(cards[0]["company"], "Acme")
+        self.assertEqual(cards[0]["location"], "Bengaluru, India")
+
     def test_linkedin_adapter_built_only_when_reader_enabled(self):
         cfg = test_config()
         cfg.linkedin.enabled = False
