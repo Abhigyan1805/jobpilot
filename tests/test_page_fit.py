@@ -2,7 +2,7 @@
 
 The captain's tailored resumes were silently two pages. The pipeline now
 measures the compiled PDF deterministically and reduces it to the configured
-page limit - tightening layout first, then dropping the least relevant content -
+page limit by dropping the least relevant content - never by tightening spacing -
 within bounded attempts, never inventing or rewriting a fact. When it cannot
 fit, it queues the posting with the measured count and flags it on the card.
 """
@@ -152,10 +152,10 @@ class OnePageEnforcementTests(unittest.TestCase):
             store.close()
 
     def test_unreadable_variant_that_fits_is_flagged_for_review(self):
-        # Every variant fits the page count, but the tightened layout drops a
-        # required section from the extracted text. A fit that is unreadable
-        # must not be reported as ready, and the reason must say so rather than
-        # claiming the page count is over the limit.
+        # Every variant fits the page count, but a required section is missing
+        # from the extracted text. A fit that is unreadable must not be reported
+        # as ready, and the reason must say so rather than claiming the page
+        # count is over the limit.
         def fake_extract(pdf_path, extractor, timeout=60):
             return "Education Experience Projects\f"
 
