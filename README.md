@@ -157,7 +157,11 @@ match score, the matched skills versus the gaps, the direct apply link, and the
 tailored resume and cover letter embedded beside the card (the PDFs are copied
 into `out/present/assets/` and linked relatively). Every card states the safety
 state: nothing was submitted, and whether the role is auto-apply eligible or
-review-only (link-out / LinkedIn / non-strong band).
+review-only, with the reason. A role is auto-apply eligible only when it is in
+the strong band *and* the pipeline queued it for a transient reason (daily cap,
+missing channel or auto-apply config); a strong-band role the pipeline routed to
+review for a blocking reason (for example an unconfirmed window), and every
+link-out, LinkedIn or non-strong-band role, is labelled review-only.
 
 Selection is deliberately narrow: only genuine technical, software-engineering,
 data and AI/ML roles are shown. Unrelated internships (design, UX,
