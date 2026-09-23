@@ -6,7 +6,7 @@ from jobpilot.config import load_config
 from jobpilot.discovery.base import SourceAdapter
 from jobpilot.discovery.linkedin import parse_search_html
 from jobpilot.discovery.localfile import LocalFileAdapter
-from jobpilot.discovery.registry import discover
+from jobpilot.discovery.registry import build_adapters, discover
 from tests.helpers import test_config
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo_postings.json"
@@ -55,6 +55,33 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("Hex Wireless", card["company"])
         self.assertIn("India", card["location"])
         self.assertIn("/jobs/view/", card["url"])
+
+    def test_linkedin_parser_reads_every_card_despite_void_elements(self):
+        # Regression: a void element (<br>/<img>) inside a card must not drift
+        # the depth counter and stop the parser after the first result.
+        markup = "".join(
+            f"""
+            <div class="base-card base-search-card job-search-card"
+                 data-entity-urn="urn:li:jobPosting:{jid}">
+              <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/x-{jid}"></a>
+              <h3 class="base-search-card__title">Machine Learning Intern {jid}</h3>
+              <h4 class="base-search-card__subtitle">Acme {jid}</h4>
+              <span class="job-search-card__location">Bengaluru, India</span>
+              <img src="logo.png"><br>
+            </div>
+            """
+            for jid in ("111", "222", "333")
+        )
+        cards = parse_search_html(markup)
+        self.assertEqual([c["job_id"] for c in cards], ["111", "222", "333"])
+        self.assertTrue(all("India" in c["location"] for c in cards))
+
+    def test_linkedin_adapter_built_only_when_reader_enabled(self):
+        cfg = test_config()
+        cfg.linkedin.enabled = False
+        self.assertNotIn("linkedin", [a.name for a in build_adapters(cfg)])
+        cfg.linkedin.enabled = True
+        self.assertIn("linkedin", [a.name for a in build_adapters(cfg)])
 
     def test_config_overrides_and_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

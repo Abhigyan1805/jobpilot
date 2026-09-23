@@ -27,6 +27,14 @@ SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/se
 VIEW_RE = re.compile(r"/jobs/view/(?:[^/?#]*?-)?(\d+)")
 JOB_ID_RE = re.compile(r"urn:li:jobPosting:(\d+)")
 
+# HTML void elements never carry an end tag. The card parser tracks nesting
+# depth to know when a result card closes; counting a void element (a <br>,
+# <img> or <input> inside a card) in that depth makes it drift upward and the
+# parser stops recognising later cards. They are excluded from the depth count.
+_VOID_ELEMENTS = frozenset(
+    {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+)
+
 
 class _LinkedInParser(HTMLParser):
     """Tolerant parser for the guest search-result cards."""
@@ -60,9 +68,12 @@ class _LinkedInParser(HTMLParser):
                 self._capture = "location"
             elif tag == "time":
                 self._cur["posted"] = attrs_d.get("datetime", "")
-        self._depth += 1
+        if tag not in _VOID_ELEMENTS:
+            self._depth += 1
 
     def handle_endtag(self, tag):
+        if tag in _VOID_ELEMENTS:
+            return
         self._depth -= 1
         if self._capture:
             self._flush()
