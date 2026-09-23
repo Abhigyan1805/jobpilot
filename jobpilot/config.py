@@ -23,11 +23,14 @@ class ProfileConfig:
     compile_timeout: int = 120
     # A student resume must fit this many pages (1 by default). The pipeline
     # measures the compiled PDF and, when over, reduces deterministically and
-    # recompiles within ``resume_fit_attempts`` bounded attempts. If it still
-    # cannot fit, the posting is queued for review with the measured count and
-    # flagged on the presentation card rather than shipping an over-long resume.
+    # recompiles within ``resume_fit_attempts`` bounded attempts. The default
+    # covers every entry of the ladder in ``pipeline._FIT_VARIANTS`` so no rung
+    # is unreachable; lower it to bound compile cost on slow engines. If it
+    # still cannot fit, the posting is queued for review with the measured count
+    # and flagged on the presentation card rather than shipping an over-long
+    # resume.
     resume_page_limit: int = 1
-    resume_fit_attempts: int = 6
+    resume_fit_attempts: int = 9
 
 
 @dataclass

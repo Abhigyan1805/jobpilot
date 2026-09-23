@@ -287,11 +287,17 @@ def self_contained_tailor_apply(
             plan.requires_review = True
             plan.review_reason = f"parseability check failed: {resume.parseability_detail}"
         if not page_ok:
-            # Detected but not reducible to the limit: queue it with the measured
-            # count and the reason, and flag it on the presentation card. Never
-            # silently ship an over-long resume as ready.
+            # Not reducible to a readable one-page resume: queue it with the
+            # reason and flag it on the presentation card. Never silently ship an
+            # over-long or unreadable resume as ready.
             plan.requires_review = True
-            page_reason = f"resume is {resume.page_count} pages, limit is {resume.page_limit}"
+            if _within_page_limit(resume, config):
+                page_reason = (
+                    "resume layout is unreadable: a required section could not "
+                    "be extracted from the fitted PDF"
+                )
+            else:
+                page_reason = f"resume is {resume.page_count} pages, limit is {resume.page_limit}"
             plan.review_reason = (
                 plan.review_reason + "; " if plan.review_reason else ""
             ) + page_reason
@@ -447,6 +453,7 @@ def _generate_and_fit(
         return resume, True
 
     used = 0
+    last_good = (0, 0, 0)
     for attempt in range(1, attempts + 1):
         layout_level, drop_bullets, drop_projects = _fit_variant(attempt)
         try:
@@ -457,9 +464,12 @@ def _generate_and_fit(
                 drop_projects=drop_projects,
             )
         except CompileError:
-            # A reduction variant failed to compile; keep the last good resume.
+            # The failed variant overwrote the shared ``resume.tex``; rewrite the
+            # kept variant so the persisted source matches the returned resume.
+            _rewrite_tex(generator, posting, match, out_dir, last_good)
             break
         used = attempt
+        last_good = (layout_level, drop_bullets, drop_projects)
         candidate.page_limit = limit
         candidate.page_fit_attempts = used
         resume = candidate
@@ -467,7 +477,26 @@ def _generate_and_fit(
             return resume, True
 
     resume.page_fit_attempts = used
-    return resume, _within_page_limit(resume, config)
+    return resume, _within_page_limit(resume, config) and _readable(resume, config)
+
+
+def _rewrite_tex(
+    generator: ResumeGenerator,
+    posting: JobPosting,
+    match,
+    out_dir: str,
+    variant: tuple[int, int, int],
+) -> None:
+    """Re-render one variant's ``.tex`` so it matches the resume object kept."""
+    layout_level, drop_bullets, drop_projects = variant
+    generator.generate(
+        posting,
+        match,
+        out_dir,
+        layout_level=layout_level,
+        drop_bullets=drop_bullets,
+        drop_projects=drop_projects,
+    )
 
 
 def _run_parseability(config: Config, resume, match, profile) -> None:

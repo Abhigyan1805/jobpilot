@@ -14,9 +14,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from jobpilot.config import default_config
 from jobpilot.matching import Matcher
-from jobpilot.pipeline import run_manual_pipeline
+from jobpilot.pipeline import _FIT_VARIANTS, run_manual_pipeline
 from jobpilot.present import ReviewCandidate, render_page, select_matches
+from jobpilot.resume.compiler import CompileError
 from jobpilot.resume.generator import ResumeGenerator
 from jobpilot.resume.parseability import count_pages
 from jobpilot.store import Store
@@ -134,6 +136,72 @@ class OnePageEnforcementTests(unittest.TestCase):
             self.assertIn("resume is 2 pages, limit is 1", app["review_reason"])
         finally:
             store.close()
+
+    def test_unreadable_variant_that_fits_is_flagged_for_review(self):
+        # Every variant fits the page count, but the tightened layout drops a
+        # required section from the extracted text. A fit that is unreadable
+        # must not be reported as ready, and the reason must say so rather than
+        # claiming the page count is over the limit.
+        def fake_extract(pdf_path, extractor, timeout=60):
+            return "Education Experience Projects\f"
+
+        with mock.patch("jobpilot.pipeline.compile_tex", side_effect=self._fake_compile), mock.patch(
+            "jobpilot.pipeline.extract_pdf_text", side_effect=fake_extract
+        ):
+            run_manual_pipeline(self.cfg, self._posting("page-fit-unreadable"))
+
+        store = Store(self.cfg.resolve(self.cfg.output.database))
+        try:
+            row = store.list_review("pending")[0]
+            self.assertEqual(row["resume_pages"], 1)
+            self.assertEqual(row["resume_page_limit"], 1)
+            app = store.iter_rows("SELECT * FROM applications")[0]
+            self.assertIn("unreadable", app["review_reason"])
+            self.assertNotIn("resume is", app["review_reason"] or "")
+        finally:
+            store.close()
+
+    def test_compile_failure_keeps_tex_matching_the_returned_resume(self):
+        # A mid-ladder variant that fails to compile must not leave its own
+        # source on disk: the persisted .tex has to match the resume that was
+        # actually kept and whose PDF was compiled.
+        calls = {"n": 0}
+
+        def flaky_compile(tex_path, engine, timeout=120):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise CompileError("boom")
+            pdf = Path(tex_path).with_suffix(".pdf")
+            pdf.write_bytes(b"%PDF-1.4 fake")
+            return str(pdf), ""
+
+        def fake_extract(pdf_path, extractor, timeout=60):
+            return self._pages_from_tex(pdf_path)
+
+        p = self._posting("page-fit-compile-fail")
+        with mock.patch("jobpilot.pipeline.compile_tex", side_effect=flaky_compile), mock.patch(
+            "jobpilot.pipeline.extract_pdf_text", side_effect=fake_extract
+        ), mock.patch("jobpilot.pipeline.check_parseability", return_value=(True, "ok")):
+            run_manual_pipeline(self.cfg, p)
+
+        store = Store(self.cfg.resolve(self.cfg.output.database))
+        try:
+            app = store.iter_rows("SELECT resume_tex FROM applications")[0]
+        finally:
+            store.close()
+        kept = Path(app["resume_tex"]).read_text(encoding="utf-8")
+
+        profile = mini_profile()
+        match = Matcher(profile, self.cfg).match(p)
+        baseline = ResumeGenerator(profile, self.cfg).generate(
+            p, match, self.cfg.resolve(self.cfg.output.dir)
+        )
+        self.assertEqual(kept, Path(baseline.tex_path).read_text(encoding="utf-8"))
+
+    def test_default_fit_attempts_cover_every_ladder_rung(self):
+        self.assertGreaterEqual(
+            default_config().profile.resume_fit_attempts, len(_FIT_VARIANTS)
+        )
 
 
 class PresentPageBadgeTests(unittest.TestCase):
