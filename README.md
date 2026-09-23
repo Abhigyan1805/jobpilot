@@ -143,6 +143,47 @@ Each queued item has a packet directory with `resume.pdf`, `cover_letter.pdf`,
 JD keywords the profile matches and the gaps it does not, so approval is one
 click.
 
+### Present: a browsable review surface
+
+```bash
+python -m jobpilot --config config.toml present
+# -> out/present/index.html  (open it in a browser; no server needed)
+```
+
+`present` turns the queued matches into one self-contained HTML page so you can
+actually look at the roles and choose, rather than read a list. One card per
+match, ordered by score, with company, title, location, window evidence, the
+match score, the matched skills versus the gaps, the direct apply link, and the
+tailored resume and cover letter embedded beside the card (the PDFs are copied
+into `out/present/assets/` and linked relatively). Every card states the safety
+state: nothing was submitted, and whether the role is auto-apply eligible or
+review-only (link-out / LinkedIn / non-strong band).
+
+Selection is deliberately narrow: only genuine technical, software-engineering,
+data and AI/ML roles are shown. Unrelated internships (design, UX,
+communications, video/content, marketing, HR, recruiting, non-technical product
+management, …) are left out entirely - not shown in a separate tier. Fit comes
+from the data the pipeline already computes: a posting's role relevance across
+the configured technical domains, confirmed by the matched skills against the
+master profile. `[present]` controls the target role set:
+
+```toml
+[present]
+out_dir = "present"                 # relative to [output].dir
+min_role_relevance = 0.5            # technical floor (per configured domain)
+borderline_role_relevance = 0.4     # shown only if nothing clears the floor
+technical_domains = ["ai_ml", "software", "research"]
+guarded_domains = ["research"]      # counts only with a matched core skill
+# exclude_terms = [...]             # non-technical role keywords, excluded outright
+```
+
+The broad `research` domain is *guarded*: it only counts as technical when the
+posting also matches a core technical skill, so design/policy/market research is
+not presented as an AI/ML role. If nothing clears the floor, the page says so and
+shows the closest technical matches with a note explaining why each is
+borderline, instead of padding the list. `present` never re-scores, never invents
+resume content and never submits.
+
 ---
 
 ## Safety model
@@ -354,9 +395,10 @@ python -m unittest discover -s tests -t .
 
 Coverage includes filtering, matching (matched vs. gap terms), dedupe, the daily cap,
 guardrails (missing required field, LinkedIn review-only, dry-run), the
-"never invent content" rule, and an integration test that compiles a tailored resume
-with the real LaTeX engine and asserts the PDF is parseable (skipped when the
-toolchain is unavailable).
+"never invent content" rule, the `present` selection rules (a non-technical
+India-eligible internship is excluded and a technical one is included), and an
+integration test that compiles a tailored resume with the real LaTeX engine and
+asserts the PDF is parseable (skipped when the toolchain is unavailable).
 
 ## Limitations
 

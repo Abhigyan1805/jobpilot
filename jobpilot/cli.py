@@ -5,6 +5,7 @@
     python -m jobpilot --config config.toml queue list
     python -m jobpilot --config config.toml queue approve 3
     python -m jobpilot --config config.toml queue export --out review.json
+    python -m jobpilot --config config.toml present
     python -m jobpilot --config config.toml link-out list
     python -m jobpilot --config config.toml link-out add --source internshala \
         --url <link> --title "Machine Learning Intern" --company Acme
@@ -20,6 +21,7 @@ from pathlib import Path
 from jobpilot.config import load_config
 from jobpilot.linkout import build_manual_posting, configured_sources
 from jobpilot.pipeline import run_manual_pipeline, run_pipeline
+from jobpilot.present import run_present
 from jobpilot.review import export_queue
 from jobpilot.store import Store
 
@@ -148,6 +150,21 @@ def cmd_link_out(args) -> int:
     return 0
 
 
+def cmd_present(args) -> int:
+    config = _load(args)
+    index, selection = run_present(config, out_dir_override=args.out)
+    print(f"presented {len(selection.included)} technical match(es)")
+    if not selection.included and selection.borderline:
+        print(
+            f"no technical match cleared the floor; showing "
+            f"{len(selection.borderline)} borderline match(es)"
+        )
+    print(f"excluded {len(selection.excluded)} non-technical / low-relevance queued posting(s)")
+    print(f"review page: {index}")
+    print("nothing was submitted.", file=sys.stderr)
+    return 0
+
+
 def cmd_postings(args) -> int:
     config = _load(args)
     store = Store(config.resolve(config.output.database))
@@ -205,6 +222,16 @@ def build_parser() -> argparse.ArgumentParser:
     qe.add_argument("--out", default="review_queue.json")
     qe.add_argument("--status", default="pending")
     p_queue.set_defaults(func=cmd_queue)
+
+    p_present = sub.add_parser(
+        "present", help="render the queued matches as a browsable HTML review page"
+    )
+    p_present.add_argument(
+        "--out",
+        default="",
+        help="output directory for index.html (default: [output].dir/[present].out_dir)",
+    )
+    p_present.set_defaults(func=cmd_present)
 
     p_post = sub.add_parser("postings", help="list tracked postings")
     p_post.add_argument("--eligible", action="store_true", default=None)

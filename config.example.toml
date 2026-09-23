@@ -138,6 +138,30 @@ window_fit = 0.10
 seniority_fit = 0.05
 
 # ---------------------------------------------------------------------------
+# Present: the browsable review surface (`jobpilot present`)
+# ---------------------------------------------------------------------------
+# Selection is presentation-only: it filters and orders what the pipeline
+# already produced, using the same role relevance and matched skills. It never
+# re-scores, invents resume content or submits.
+[present]
+# Page directory, resolved relative to [output].dir. Writes <out_dir>/index.html
+# and copies each tailored PDF into <out_dir>/assets/ beside it.
+out_dir = "present"
+# A role is technical when its relevance in one of `technical_domains` reaches
+# `min_role_relevance`. A `guarded_domains` domain ("research") only counts when
+# the posting also matches a `core_skills` term, because "research" alone matches
+# design/policy/market research too. Retarget the presented role set here.
+min_role_relevance = 0.5
+borderline_role_relevance = 0.4
+technical_domains = ["ai_ml", "software", "research"]
+guarded_domains = ["research"]
+# Non-technical role keywords excluded outright (matched against the title), so
+# design, UX, communications, content, marketing, HR, recruiting, sales and
+# non-technical product/operations roles are never presented even if they are
+# India-eligible and in-window.
+# exclude_terms = ["design", "marketing", "hr", "recruit", "sales", ...]
+
+# ---------------------------------------------------------------------------
 # Applying
 # ---------------------------------------------------------------------------
 [apply]

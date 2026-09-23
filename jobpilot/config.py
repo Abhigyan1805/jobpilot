@@ -277,6 +277,70 @@ class MatchConfig:
 
 
 @dataclass
+class PresentConfig:
+    """Selection and rendering for ``jobpilot present``.
+
+    This is a *presentation* layer only: it filters and orders what the pipeline
+    already produced. It never re-scores, never invents resume content and never
+    submits anything.
+
+    ``technical_domains`` names the ``[match.target_terms]`` domains that count
+    as a genuine technical / AI-ML fit. A domain listed in ``guarded_domains``
+    (``research`` by default) only counts when the posting also matches at least
+    one ``core_skills`` term, because "research" alone matches design research,
+    policy research and market research as readily as ML research. Retarget the
+    presented role set by changing ``technical_domains``, ``min_role_relevance``
+    and ``exclude_terms`` - never by hardcoding a role in code.
+    """
+
+    # Directory for the generated page, resolved relative to ``[output].dir``
+    # (an absolute path is used as-is). The page is ``<out_dir>/index.html``.
+    out_dir: str = "present"
+    min_role_relevance: float = 0.5
+    borderline_role_relevance: float = 0.4
+    technical_domains: list[str] = field(
+        default_factory=lambda: ["ai_ml", "software", "research"]
+    )
+    guarded_domains: list[str] = field(default_factory=lambda: ["research"])
+    core_skills: list[str] = field(
+        default_factory=lambda: [
+            "Python", "C++", "Java", "JavaScript", "TypeScript", "SQL",
+            "PostgreSQL", "R", "HTML/CSS", "React", "Node.js", "FastAPI",
+            "Flask", "Django", "REST APIs", "GraphQL", "Docker", "Kubernetes",
+            "Git", "CI/CD", "Google Cloud Platform", "AWS", "Azure", "Linux",
+            "Machine Learning", "Deep Learning", "LLMs", "Generative AI", "NLP",
+            "Computer Vision", "RLHF", "Reinforcement Learning",
+            "Prompt Engineering", "RAG", "Fine-tuning", "PyTorch", "TensorFlow",
+            "Hugging Face", "Scikit-learn", "pandas", "NumPy", "Matplotlib",
+            "XGBoost", "Data Analysis", "Data Science", "Data Engineering",
+            "Data Visualization", "Statistics", "Forecasting", "MLOps",
+            "Model Deployment", "Predictive Modeling", "Algorithms",
+        ]
+    )
+    # Non-technical role keywords excluded from the presented list even if a
+    # posting's role relevance clears the floor. Matched against the title as a
+    # word-start prefix (so "design" catches "designer"), configurable.
+    exclude_terms: list[str] = field(
+        default_factory=lambda: [
+            "design", "ux", "ui", "user experience", "graphic", "visual",
+            "brand", "communication", "content", "video", "editor", "writer",
+            "copy", "social media", "marketing", "seo", "advertis", "campaign",
+            "demand generation", "lead generation", "data entry", "human resources",
+            "human resource", "hr", "recruit", "talent", "hiring", "sales",
+            "business development", "account", "finance", "bookkeep",
+            "taxation", "customer success", "customer support",
+            "customer service", "campus ambassador", "campus representative",
+            "community", "partnership", "sponsorship", "fundrais",
+            "product management", "project management", "product marketing",
+            "operations", "receptionist", "hotel management", "voice over",
+            "music", "acting", "tutor", "teacher", "counsel", "psychology",
+            "correspondent",
+        ]
+    )
+    max_borderline: int = 8
+
+
+@dataclass
 class ApplyConfig:
     enabled: bool = True
     auto_apply_strong: bool = True
@@ -304,6 +368,7 @@ class Config:
     sources: dict[str, SourceConfig] = field(default_factory=dict)
     filter: FilterConfig = field(default_factory=FilterConfig)
     match: MatchConfig = field(default_factory=MatchConfig)
+    present: PresentConfig = field(default_factory=PresentConfig)
     apply: ApplyConfig = field(default_factory=ApplyConfig)
     linkedin: LinkedInConfig = field(default_factory=LinkedInConfig)
     link_out: LinkOutConfig = field(default_factory=LinkOutConfig)
@@ -395,6 +460,8 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         _update_dataclass(cfg.filter, raw["filter"])
     if "match" in raw:
         _update_dataclass(cfg.match, raw["match"])
+    if "present" in raw:
+        _update_dataclass(cfg.present, raw["present"])
     if "apply" in raw:
         _update_dataclass(cfg.apply, raw["apply"])
     if "linkedin" in raw:

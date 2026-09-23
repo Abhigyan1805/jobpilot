@@ -224,6 +224,16 @@ class Matcher:
             return "shortlist", None
         return "reject", None
 
+    def role_relevance_by_domain(self, posting: JobPosting) -> dict[str, float]:
+        """Per-target-domain relevance, the same numbers the rubric reports.
+
+        Read-only accessor for presentation/selection: it computes nothing new
+        and changes no score. ``match()`` still stores only the best domain as
+        the ``role_relevance`` component.
+        """
+        _best, scores = self._role_relevance(posting)
+        return scores
+
     def _role_relevance(self, posting: JobPosting) -> tuple[float, dict[str, float]]:
         title_norm = normalize(posting.title)
         body_norm = normalize(_role_description(posting.description))
