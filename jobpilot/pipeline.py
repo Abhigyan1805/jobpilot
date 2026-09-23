@@ -13,6 +13,7 @@ from jobpilot.critique import suggest_red_flags
 from jobpilot.cover_letter import CoverLetterGenerator
 from jobpilot.discovery import FetchOutcome, discover
 from jobpilot.filtering import filter_posting
+from jobpilot.lexicon import present_surface_forms
 from jobpilot.matching import Matcher
 from jobpilot.models import ApplicationPlan, JobPosting
 from jobpilot.profile import load_profile
@@ -287,7 +288,7 @@ def self_contained_tailor_apply(
         )
         resume.pdf_path = pdf_path
         resume.compile_log = log
-        _run_parseability(config, resume, match)
+        _run_parseability(config, resume, match, generator.profile)
         if config.match.require_parseable and not resume.parseability_ok:
             plan.requires_review = True
             plan.review_reason = f"parseability check failed: {resume.parseability_detail}"
@@ -330,8 +331,14 @@ def self_contained_tailor_apply(
     return plan, outcome
 
 
-def _run_parseability(config: Config, resume, match) -> None:
-    required_keywords = list(match.coverage.matched)
+def _run_parseability(config: Config, resume, match, profile) -> None:
+    # Test keyword survival against the profile-present surface forms, not the
+    # canonical labels: the no-invention generator can only emit words that are
+    # in the profile, so a canonical term supported solely through an alias
+    # (e.g. "Communication" via "cross-functional") must be checked as that
+    # alias or a perfectly parseable resume is reported unparseable.
+    profile_text = " ".join([profile.raw_text, *profile.skill_terms()])
+    required_keywords = present_surface_forms(list(match.coverage.matched), profile_text)
     try:
         text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
     except TextExtractionError as exc:

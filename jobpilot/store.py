@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS applications (
     red_flags TEXT,
     adapter TEXT,
     review_reason TEXT,
+    review_category TEXT,
     resume_tex TEXT,
     resume_pdf TEXT,
     resume_text TEXT,
@@ -125,9 +126,10 @@ CREATE TABLE IF NOT EXISTS runs (
 # Review routes caused by a transient condition. Such a posting may be
 # auto-applied once the condition clears (the daily cap window resets, a
 # submission channel/recipient is configured, or auto-apply is re-enabled), so
-# these reasons must not dedupe. Reasons that encode a human decision
-# (``human_*``), an uncertain window/match, or a manual-only source stay
-# blocking.
+# these categories must not dedupe. The category is stored in
+# ``applications.review_category``; ``review_reason`` holds the human-readable
+# detail. Categories that encode a human decision (``human_*``), an uncertain
+# window/match, or a manual-only source stay blocking.
 TRANSIENT_REVIEW_REASONS = frozenset({"capped", "no_channel", "config"})
 
 
@@ -154,6 +156,14 @@ class Store:
         cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(applications)")}
         if "review_reason" not in cols:
             self.conn.execute("ALTER TABLE applications ADD COLUMN review_reason TEXT")
+        if "review_category" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN review_category TEXT")
+            # Older rows stored only the guard category in review_reason; copy it
+            # across so transient-route detection keeps working after upgrade.
+            self.conn.execute(
+                "UPDATE applications SET review_category = review_reason "
+                "WHERE review_category IS NULL"
+            )
         rq_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(review_queue)")}
         if "matched_keywords" not in rq_cols:
             self.conn.execute("ALTER TABLE review_queue ADD COLUMN matched_keywords TEXT")
@@ -289,7 +299,8 @@ class Store:
             if status in ("submitting", "submitted"):
                 return row
             if status == "manual_required":
-                if (row["review_reason"] or "") in TRANSIENT_REVIEW_REASONS:
+                category = row["review_category"] or row["review_reason"] or ""
+                if category in TRANSIENT_REVIEW_REASONS:
                     continue
                 return row
         return None
@@ -309,6 +320,7 @@ class Store:
         mode: str,
         adapter: str = "",
         review_reason: str = "",
+        review_category: str = "",
     ) -> int:
         now = utcnow()
         p, m = plan.posting, plan.match
@@ -316,9 +328,10 @@ class Store:
             """
             INSERT INTO applications (
                 stable_id, company, title, url, apply_url, status, mode, score, gaps,
-                red_flags, adapter, review_reason, resume_tex, resume_pdf, resume_text,
-                cover_tex, cover_pdf, cover_text, parseability_ok, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                red_flags, adapter, review_reason, review_category, resume_tex, resume_pdf,
+                resume_text, cover_tex, cover_pdf, cover_text, parseability_ok, created_at,
+                updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 p.stable_id,
@@ -333,6 +346,7 @@ class Store:
                 json.dumps(plan.red_flags),
                 adapter,
                 review_reason,
+                review_category,
                 plan.resume.tex_path if plan.resume else "",
                 plan.resume.pdf_path if plan.resume else "",
                 plan.resume.text if plan.resume else "",
@@ -446,8 +460,9 @@ class Store:
         )
         # A human decision closes the route for good: the posting must never be
         # auto-submitted afterwards, even if the original route was transient.
+        # The category records the decision; review_reason keeps the detail.
         self.conn.execute(
-            "UPDATE applications SET review_reason=?, updated_at=? "
+            "UPDATE applications SET review_category=?, updated_at=? "
             "WHERE stable_id=? AND status='manual_required'",
             (f"human_{status}", utcnow(), row["stable_id"]),
         )

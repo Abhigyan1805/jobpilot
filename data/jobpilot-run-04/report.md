@@ -184,7 +184,7 @@ From the run's own record (`/mnt/d/jobpilot/jobpilot.db`):
 - **Effect:** `parseability_failed` fell from 16/16 to 7/16, and the previously red
   integration test `test_tailored_resume_compiles_and_is_parseable` now passes.
 
-### B. (REPORTED, not fixed) False parseability failures from alias-only keyword matches
+### B. (FIXED) False parseability failures from alias-only keyword matches
 
 - **Symptom:** the remaining 7 failures are all the same shape — the only matched
   keyword is `Communication`, and the check reports
@@ -199,11 +199,12 @@ From the run's own record (`/mnt/d/jobpilot/jobpilot.db`):
   parseable resume.
 - **Impact:** misclassifies 7/16 postings (all the non-technical India
   internships) as unparseable, forcing them to review for a reason that is not
-  real. Proposed fix: test keyword survival against the profile-present surface
-  forms/aliases rather than the canonical label, or exclude soft-skill canonicals
-  whose only support is an alias from the parseability requirement.
+  real. **Fixed:** keyword survival is now checked against the profile-present
+  surface forms (`lexicon.present_surface_forms`), so an alias-only canonical is
+  tested as that alias rather than the canonical label the never-invent generator
+  cannot emit. See README "Tailoring and the no-invention guarantee".
 
-### C. (REPORTED, not fixed) Rubric promotes non-AI India internships to the "strong" band
+### C. (FIXED) Rubric promotes non-AI India internships to the "strong" band
 
 - **Symptom:** 5 of the 8 `strong` postings are non-technical (UX Design,
   Communications, Video Editor, 2× Talent Acquisition). `Groww Video Editor Intern`
@@ -216,23 +217,29 @@ From the run's own record (`/mnt/d/jobpilot/jobpilot.db`):
 - **Impact:** "strong" is the auto-apply band; with auto-apply on, unrelated
   internships would be treated as strong matches. For a rubric whose stated job is
   to rank AI/ML internships, `role_relevance = 0` should be disqualifying from
-  "strong" (or the strong threshold should require a minimum role relevance).
-  Not fixed here because it is a scoring-policy change, not a run blocker.
+  "strong". **Fixed:** `strong` now additionally requires
+  `role_relevance >= match.strong_min_role_relevance` (default 0.5); a posting that
+  clears the score threshold but sits below the floor is capped to `shortlist`
+  with a reason. See README "Matching" and `AGENTS.md`.
 
-### D. (REPORTED, minor) JD boilerplate inflates `role_relevance` for non-AI roles
+### D. (FIXED, minor) JD boilerplate inflates `role_relevance` for non-AI roles
 
 - Glance UX Design Intern and InMobi Communications Intern score `ai_ml = 0.67`
   purely from "Machine Learning" / "Generative AI" in company boilerplate, ranking
-  them above the genuinely technical Stripe SWE Intern. A title/description
-  relevance signal should discount boilerplate mentions.
+  them above the genuinely technical Stripe SWE Intern. **Fixed:** role relevance
+  is computed over the role section only (`matching._role_description` drops
+  company boilerplate above the first role heading), a title hit weighs far more
+  than a body mention, and the body contribution is capped below the strong-band
+  floor. See README "Matching".
 
-### E. (REPORTED, minor) Lost parseability detail in the durable record
+### E. (FIXED, minor) Lost parseability detail in the durable record
 
 - `applications.review_reason` stores the guard **category** (`"generation"`), not
   the detailed `plan.review_reason` (`"parseability check failed: <detail>"`), so
   the SQLite record alone does not say why a resume was flagged. The detail is
-  only visible by re-running the check. Persisting `plan.review_reason` would make
-  the store self-explanatory.
+  only visible by re-running the check. **Fixed:** `applications.review_reason`
+  now holds the detailed reason and a new `review_category` column holds the guard
+  category, so the store explains itself. See `AGENTS.md`.
 
 ### F. (REPORTED, minor) Workable widget API rate-limits; Greenhouse always fetches full content
 
@@ -252,4 +259,7 @@ submissions**. The best real matches are the two Rubrik Bangalore Software
 Engineer winter interns (Jan–May 2027, score 0.877) and the Stripe Bengaluru
 Software Engineer intern (0.784). No pure AI/ML internship surfaced from these
 public boards; the run is honest about that. One run-blocking defect (the
-parseability path bug) was fixed and covered by tests; the rest are reported above.
+parseability path bug) was fixed and covered by tests during the run; the four
+defects it surfaced - false alias-only parseability failures and the three rubric
+and record defects (B–E) - have since been fixed and tested. Defect F (Workable
+rate-limiting, Greenhouse full-content fetches) remains open.

@@ -183,8 +183,8 @@ Components (weights configurable under `[match.weights]`):
 
 | Component | What it measures |
 | --- | --- |
-| `skill_coverage` | share of the JD's extractable skills the profile genuinely supports |
-| `role_relevance` | overlap with target domains (AI/ML, software, research), with a title boost |
+| `skill_coverage` | share of the role section's extractable skills the profile genuinely supports |
+| `role_relevance` | overlap with the configured target domains (`[match.target_terms]`), where a **title** hit counts far more than a body mention |
 | `location_fit` | India / remote-eligible-from-India |
 | `window_fit` | Jan-Jun plausibility, weighted by how explicit the dates are |
 | `seniority_fit` | clearly an internship vs. not |
@@ -192,7 +192,29 @@ Components (weights configurable under `[match.weights]`):
 Every score is stored with its reasons, its component breakdown and its formula.
 Keyword coverage is exact: supported JD terms are listed as **matched**; terms the
 profile does not support are listed as **gaps** and are **never inserted** into the
-resume. Bands: `strong` (auto-apply), `shortlist` (tailor + review), `reject`.
+resume.
+
+**Bands.** `strong` (auto-apply), `shortlist` (tailor + review), `reject`. A
+posting reaches `strong` only when it clears `match.strong_threshold` *and* its
+`role_relevance` reaches `match.strong_min_role_relevance` (default `0.5`). That
+second gate is deliberate: location, seniority and window can saturate for any
+India internship and a single soft-skill keyword can lift skill coverage, so an
+unrelated internship can clear the score threshold while being irrelevant to the
+search. When that happens the posting is **capped to `shortlist`** - tailored and
+queued for review, never auto-applied - and the reason string says so:
+`strong band withheld: role relevance 0.00 is below the 0.50 minimum for the
+configured target domains (...)`.
+
+**Retargeting.** The search target is configuration, not code: edit
+`[match.target_terms]` (default `ai_ml`, `software`, `research`) and
+`match.strong_min_role_relevance` to serve a different search. Skill coverage and
+role relevance are computed from the **role section** of the description
+(everything from the first `what you'll do` / `responsibilities` /
+`requirements`-style heading onward); the company blurb above it is ignored, so a
+blurb mention of "machine learning" or "generative AI" cannot establish
+relevance. Role relevance is also title-weighted and its body contribution is
+capped below the floor: only a title that names a target domain, or a title match
+plus supporting role-description terms, can reach it.
 
 ## Tailoring and the no-invention guarantee
 
@@ -215,8 +237,12 @@ Additional checks from the recruiter-prompt workflow:
   terms; unsupported terms are gaps, never inserted.
 - **Parseability check on the compiled PDF**: text is extracted with `pdftotext` and
   the standard sections and target keywords must be present as machine-readable
-  text. If a required section or keyword is unextractable, generation fails and the
-  application is forced to review.
+  text. Keyword survival is tested against the **profile-present surface forms**,
+  not canonical labels, so a term the profile supports only through an alias
+  (e.g. `Communication` via `cross-functional`) is checked as that alias and a
+  perfectly parseable resume is not reported unparseable. If a required section
+  or keyword is unextractable, generation fails and the application is forced to
+  review, with the detailed reason persisted on the durable application record.
 - **Red-flag critique**: a deterministic advisor proposes operator-facing
   suggestions. They are suggestions, never facts, and never alter content. They are
   stored with the application record. (An optional LLM-advisor hook is a documented

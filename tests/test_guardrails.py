@@ -85,6 +85,24 @@ class GuardrailTests(unittest.TestCase):
         queued = [r["stable_id"] for r in self.store.list_review("pending")]
         self.assertIn(plan.posting.stable_id, queued)
 
+    def test_detailed_review_reason_is_persisted_with_its_category(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        plan = plan_for(posting(job_id="reason-1"))
+        plan.requires_review = True
+        plan.review_reason = "parseability check failed: keyword survival 0% below 50%"
+
+        applier.process(plan)
+
+        row = self.store.conn.execute(
+            "SELECT review_reason, review_category FROM applications WHERE stable_id = ?",
+            (plan.posting.stable_id,),
+        ).fetchone()
+        self.assertEqual(
+            row["review_reason"], "parseability check failed: keyword survival 0% below 50%"
+        )
+        self.assertEqual(row["review_category"], "generation")
+
     def test_unknown_window_strong_match_never_auto_submitted(self):
         adapter = FakeAdapter(self.cfg)
         applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)

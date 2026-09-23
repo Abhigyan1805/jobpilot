@@ -132,7 +132,8 @@ class ManualReviewRoutingTests(unittest.TestCase):
         applier.process(plan_for(p))
         row = self.store.submitted_or_attempted(p.stable_id)
         self.assertIsNotNone(row)
-        self.assertEqual(row["review_reason"], "manual_source")
+        self.assertEqual(row["review_category"], "manual_source")
+        self.assertIn("manual link-out source", row["review_reason"])
         self.assertNotIn("manual_source", TRANSIENT_REVIEW_REASONS)
 
 
