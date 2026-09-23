@@ -36,7 +36,7 @@ from jobpilot.matching import Matcher
 from jobpilot.models import JobPosting
 from jobpilot.profile import load_profile
 from jobpilot.review import safe_filename
-from jobpilot.store import Store
+from jobpilot.store import TRANSIENT_REVIEW_REASONS, Store
 
 
 @dataclass
@@ -55,6 +55,8 @@ class ReviewCandidate:
     packet_dir: str = ""
     window_label: str = ""
     window_confidence: float = 0.0
+    review_category: str = ""
+    review_reason: str = ""
 
     @property
     def company(self) -> str:
@@ -142,6 +144,7 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
         posting_row = postings.get(row["stable_id"])
         if posting_row is None:
             continue
+        route_row = store.latest_review_application(row["stable_id"])
         candidates.append(
             ReviewCandidate(
                 review_id=int(row["id"]),
@@ -156,6 +159,8 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
                 packet_dir=row["packet_dir"] or "",
                 window_label=posting_row["window_label"] or "",
                 window_confidence=float(posting_row["window_confidence"] or 0.0),
+                review_category=(route_row["review_category"] or "") if route_row else "",
+                review_reason=(route_row["review_reason"] or "") if route_row else "",
             )
         )
     return candidates
@@ -163,12 +168,12 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
 
 @lru_cache(maxsize=1024)
 def _exclude_re(term: str) -> re.Pattern[str]:
+    # Every exclusion is a whole-word phrase. Prefix matching would drop genuine
+    # technical roles ("visual" -> "Data Visualization", "operations" ->
+    # "Machine Learning Operations"), so the list spells out the non-technical
+    # phrases instead.
     escaped = re.escape(term.lower().strip())
-    if len(term.strip()) <= 3:
-        # Short terms ("hr", "ux", "ui") must be whole words, never prefixes.
-        return re.compile(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])")
-    # Longer terms match at a word start, so "design" catches "designer".
-    return re.compile(rf"(?<![a-z0-9]){escaped}")
+    return re.compile(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])")
 
 
 def title_is_excluded(title: str, exclude_terms: list[str]) -> str:
@@ -217,16 +222,25 @@ def _classify_route(candidate: ReviewCandidate, config: Config) -> tuple[str, st
         )
     armed = bool(config.apply.enabled and config.apply.auto_apply_strong)
     if candidate.band == "strong":
-        if armed:
+        if armed and candidate.review_category in TRANSIENT_REVIEW_REASONS:
             return (
                 "auto",
                 "Auto-apply eligible",
-                "Not submitted. Strong auto-apply band and auto-apply is enabled in config.",
+                "Not submitted. Strong auto-apply band, queued only for a transient reason "
+                "(daily cap, missing channel or auto-apply config); auto-apply is enabled, "
+                "so a later run can submit it once that condition clears.",
             )
+        if not armed:
+            return (
+                "review",
+                "Review-only (auto-apply off)",
+                "Not submitted. Strong auto-apply band, but auto-apply is off in config, so it was queued for review.",
+            )
+        reason = candidate.review_reason or candidate.review_category or "the pipeline's guardrails"
         return (
             "review",
-            "Review-only (auto-apply off)",
-            "Not submitted. Strong auto-apply band, but auto-apply is off in config, so it was queued for review.",
+            "Review-only",
+            f"Not submitted. Strong auto-apply band, but the pipeline routed it to review: {reason}.",
         )
     band = candidate.band or "unknown"
     return (
@@ -445,7 +459,9 @@ def _copy_asset(src: str, dest: Path) -> str:
     return dest.name
 
 
-def _render_card(match: PresentMatch, rank: int, assets_rel: str, slug: str) -> str:
+def _render_card(
+    match: PresentMatch, rank: int, assets_rel: str, slug: str, resume_name: str, cover_name: str
+) -> str:
     c = match.candidate
     css = "card borderline" if match.borderline else "card"
     domains = ", ".join(f"{name}={score:.2f}" for name, score in match.domain_scores.items())
@@ -453,8 +469,6 @@ def _render_card(match: PresentMatch, rank: int, assets_rel: str, slug: str) -> 
     if match.borderline and match.borderline_note:
         note = f'<div class="note">Borderline: {_esc(match.borderline_note)}.</div>'
 
-    resume_name = _asset_name(c.resume_pdf)
-    cover_name = _asset_name(c.cover_pdf)
     pdfs = []
     if resume_name:
         rel = f"{assets_rel}/{slug}/resume.pdf"
@@ -508,10 +522,6 @@ def _render_card(match: PresentMatch, rank: int, assets_rel: str, slug: str) -> 
       <div class="pdfs">{"".join(pdfs)}</div>
     </article>
     """
-
-
-def _asset_name(path: str) -> str:
-    return Path(path).name if path else ""
 
 
 def _pdf_block(label: str, rel: str) -> str:
@@ -638,9 +648,9 @@ def render_page(
     for match in [*selection.included, *selection.borderline]:
         rank += 1
         slug = _asset_slug(match.candidate)
-        _copy_asset(match.candidate.resume_pdf, out / "assets" / slug / "resume.pdf")
-        _copy_asset(match.candidate.cover_pdf, out / "assets" / slug / "cover_letter.pdf")
-        cards.append(_render_card(match, rank, "assets", slug))
+        resume_name = _copy_asset(match.candidate.resume_pdf, out / "assets" / slug / "resume.pdf")
+        cover_name = _copy_asset(match.candidate.cover_pdf, out / "assets" / slug / "cover_letter.pdf")
+        cards.append(_render_card(match, rank, "assets", slug, resume_name, cover_name))
     index = out / "index.html"
     index.write_text(_render_document(selection, config, cards, generated_at), encoding="utf-8")
     return index

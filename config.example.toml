@@ -155,11 +155,13 @@ min_role_relevance = 0.5
 borderline_role_relevance = 0.4
 technical_domains = ["ai_ml", "software", "research"]
 guarded_domains = ["research"]
-# Non-technical role keywords excluded outright (matched against the title), so
-# design, UX, communications, content, marketing, HR, recruiting, sales and
-# non-technical product/operations roles are never presented even if they are
-# India-eligible and in-window.
-# exclude_terms = ["design", "marketing", "hr", "recruit", "sales", ...]
+# Non-technical role keywords excluded outright (matched against the title as a
+# whole-word phrase), so design, UX, communications, content, marketing, HR,
+# recruiting, sales and non-technical product/operations roles are never
+# presented even if they are India-eligible and in-window. Use phrases, not bare
+# ambiguous words: "graphic design" excludes design roles but leaves "system
+# design", and "business operations" leaves "machine learning operations".
+# exclude_terms = ["graphic design", "marketing", "hr", "recruiting", "sales", ...]
 
 # ---------------------------------------------------------------------------
 # Applying

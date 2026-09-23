@@ -319,21 +319,33 @@ class PresentConfig:
     )
     # Non-technical role keywords excluded from the presented list even if a
     # posting's role relevance clears the floor. Matched against the title as a
-    # word-start prefix (so "design" catches "designer"), configurable.
+    # whole-word phrase, so an ambiguous word only excludes the non-technical
+    # sense: "graphic design" is excluded but "AI system design" is not,
+    # "business operations" is excluded but "machine learning operations" is
+    # not, and "visual design" is excluded but "data visualization" is not.
+    # Spell out inflections ("recruiter" as well as "recruiting") rather than
+    # relying on prefix matching, which would drop genuine technical roles.
+    # Configurable.
     exclude_terms: list[str] = field(
         default_factory=lambda: [
-            "design", "ux", "ui", "user experience", "graphic", "visual",
-            "brand", "communication", "content", "video", "editor", "writer",
-            "copy", "social media", "marketing", "seo", "advertis", "campaign",
-            "demand generation", "lead generation", "data entry", "human resources",
-            "human resource", "hr", "recruit", "talent", "hiring", "sales",
-            "business development", "account", "finance", "bookkeep",
+            "graphic design", "product design", "ux design", "ui design",
+            "visual design", "interaction design", "web design", "motion design",
+            "brand design", "designer", "ux", "ui", "user experience", "graphic",
+            "brand", "communication", "communications", "content", "video",
+            "editor", "editorial", "writer", "writing", "copywriter",
+            "copywriting", "social media", "marketing", "seo", "advertising",
+            "advertisement", "advertiser", "campaign", "demand generation",
+            "lead generation", "data entry", "human resources", "human resource",
+            "hr", "recruiting", "recruiter", "recruitment", "talent", "hiring",
+            "sales", "business development", "accounting", "accountant",
+            "account management", "account executive", "finance", "bookkeeping",
             "taxation", "customer success", "customer support",
             "customer service", "campus ambassador", "campus representative",
-            "community", "partnership", "sponsorship", "fundrais",
+            "community", "partnership", "sponsorship", "fundraising",
             "product management", "project management", "product marketing",
-            "operations", "receptionist", "hotel management", "voice over",
-            "music", "acting", "tutor", "teacher", "counsel", "psychology",
+            "business operations", "people operations", "receptionist",
+            "hotel management", "voice over", "music", "acting", "tutor",
+            "teacher", "counsel", "counseling", "counselor", "psychology",
             "correspondent",
         ]
     )

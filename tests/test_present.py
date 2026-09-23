@@ -22,13 +22,14 @@ from jobpilot.models import ApplicationPlan, GeneratedCoverLetter, GeneratedResu
 from jobpilot.present import (
     ReviewCandidate,
     SelectionResult,
+    build_candidates,
     render_page,
     run_present,
     select_matches,
     title_is_excluded,
 )
 from jobpilot.store import Store
-from tests.helpers import MINI_PROFILE, mini_profile, posting, test_config
+from tests.helpers import MINI_PROFILE, mini_profile, plan_for, posting, strong_match, test_config
 
 ML_JD = "Machine learning internship. Python, RAG, LLMs, evaluation."
 
@@ -42,6 +43,8 @@ def candidate(
     band="shortlist",
     resume="",
     cover="",
+    review_category="",
+    review_reason="",
 ):
     return ReviewCandidate(
         review_id=1,
@@ -53,6 +56,8 @@ def candidate(
         reasons=[],
         resume_pdf=resume,
         cover_pdf=cover,
+        review_category=review_category,
+        review_reason=review_reason,
     )
 
 
@@ -169,13 +174,76 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(routes["internshala"], "linkout")
         self.assertEqual(routes["linkedin"], "linkedin")
 
+    def test_strong_band_route_reflects_stored_review_category(self):
+        technical = posting(title="Machine Learning Intern", description=ML_JD)
+
+        # Queued only because auto-apply was off: with auto-apply armed the next
+        # run can submit it, so it stays auto-apply eligible.
+        transient = candidate(
+            technical,
+            matched=["Python"],
+            band="strong",
+            review_category="config",
+            review_reason="auto-apply disabled by config",
+        )
+        # Queued for an unconfirmed window: a blocking route, never auto-applied.
+        blocking = candidate(
+            posting(job_id="blocking", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python"],
+            band="strong",
+            review_category="window",
+            review_reason="Jan-Jun window unconfirmed; review before applying",
+        )
+        result = select_matches([transient, blocking], self.matcher, self.cfg)
+        routes = {m.candidate.posting.job_id: m for m in result.included}
+
+        self.assertEqual(routes["1"].route, "auto")
+        self.assertEqual(routes["1"].route_label, "Auto-apply eligible")
+        self.assertEqual(routes["blocking"].route, "review")
+        self.assertNotIn("Auto-apply eligible", routes["blocking"].route_label)
+        self.assertIn("unconfirmed", routes["blocking"].safety_detail)
+
     def test_title_exclusion_helper_and_config(self):
-        self.assertEqual(title_is_excluded("Graphic Designer", ["design"]), "design")
+        self.assertEqual(title_is_excluded("Graphic Designer", ["designer"]), "designer")
+        self.assertEqual(title_is_excluded("Graphic Design Intern", ["graphic design"]), "graphic design")
         self.assertEqual(title_is_excluded("HR Intern", ["hr"]), "hr")
         self.assertEqual(title_is_excluded("Machine Learning Intern", ["design"]), "")
 
         cfg = test_config(present={"exclude_terms": ["robotics"]})
         self.assertEqual(title_is_excluded("Robotics Intern", cfg.present.exclude_terms), "robotics")
+
+    def test_colliding_words_do_not_exclude_technical_titles(self):
+        # "visual", "operations" and "design" collide with genuine technical
+        # vocabulary; the exclusions are phrase-based so these roles survive.
+        for title in (
+            "Data Visualization Intern",
+            "Machine Learning Operations Intern",
+            "AI System Design Intern",
+        ):
+            self.assertEqual(title_is_excluded(title, self.cfg.present.exclude_terms), "")
+
+    def test_colliding_word_titles_are_selected_as_technical(self):
+        cfg = test_config(present={"min_role_relevance": 0.4, "borderline_role_relevance": 0.3})
+        matcher = Matcher(mini_profile(), cfg)
+        candidates = [
+            candidate(
+                posting(job_id="viz", title="Data Visualization Intern", description=ML_JD),
+                matched=["Python", "RAG"],
+            ),
+            candidate(
+                posting(job_id="mlops", title="Machine Learning Operations Intern", description=ML_JD),
+                matched=["Python"],
+            ),
+            candidate(
+                posting(job_id="sys-design", title="AI System Design Intern", description=ML_JD),
+                matched=["Python"],
+            ),
+        ]
+        result = select_matches(candidates, matcher, cfg)
+        self.assertEqual(
+            sorted(m.candidate.posting.job_id for m in result.included),
+            ["mlops", "sys-design", "viz"],
+        )
 
 
 class RenderTests(unittest.TestCase):
@@ -227,6 +295,53 @@ class RenderTests(unittest.TestCase):
         html = index.read_text(encoding="utf-8")
         self.assertIn("No technical matches to show", html)
         self.assertIn("Nothing was submitted", html)
+
+    def test_stale_pdf_path_renders_missing_fallback_not_broken_iframe(self):
+        gone = candidate(
+            posting(title="Machine Learning Intern", description=ML_JD),
+            matched=["Python"],
+            resume=str(Path(self.tmp.name) / "gone-resume.pdf"),
+            cover=str(Path(self.tmp.name) / "gone-cover.pdf"),
+        )
+        selection = select_matches([gone], self.matcher, self.cfg)
+        index = render_page(selection, self.cfg, Path(self.tmp.name) / "present")
+        html = index.read_text(encoding="utf-8")
+
+        self.assertIn("No resume PDF was produced.", html)
+        self.assertIn("No cover letter PDF was produced.", html)
+        self.assertNotIn("<iframe", html)
+
+    def test_strong_band_window_review_is_labelled_review_only(self):
+        store = Store(self.cfg.resolve(self.cfg.output.database))
+        try:
+            p = posting(job_id="window-1", title="Machine Learning Intern", description=ML_JD)
+            store.upsert_posting(p, eligible=True)
+            match = strong_match()
+            store.save_match(p.stable_id, match, eligible=True, reject_reasons=[])
+            plan = plan_for(p, match)
+            store.create_application(
+                plan,
+                status="manual_required",
+                mode="review",
+                review_category="window",
+                review_reason="Jan-Jun window unconfirmed; review before applying",
+            )
+            store.enqueue_review(plan, packet_dir="")
+            candidates = build_candidates(store)
+        finally:
+            store.close()
+
+        selection = select_matches(candidates, self.matcher, self.cfg)
+        self.assertEqual(len(selection.included), 1)
+        route = selection.included[0]
+        self.assertEqual(route.route, "review")
+        self.assertNotIn("Auto-apply eligible", route.route_label)
+        self.assertIn("unconfirmed", route.safety_detail)
+
+        index = render_page(selection, self.cfg, Path(self.tmp.name) / "present")
+        html = index.read_text(encoding="utf-8")
+        self.assertNotIn("Auto-apply eligible", html)
+        self.assertIn("unconfirmed", html)
 
     def test_run_present_reads_the_store_and_writes_the_page(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))

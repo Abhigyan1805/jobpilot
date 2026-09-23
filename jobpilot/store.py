@@ -305,6 +305,19 @@ class Store:
                 return row
         return None
 
+    def latest_review_application(self, stable_id: str) -> sqlite3.Row | None:
+        """Return the current review route for a posting, if it was queued.
+
+        Every route to the review queue creates a ``manual_required`` application
+        row carrying the guard category and the human-readable reason, so the
+        presentation layer can report what the pipeline actually decided.
+        """
+        return self.conn.execute(
+            "SELECT * FROM applications WHERE stable_id = ? AND status = 'manual_required' "
+            "ORDER BY id DESC LIMIT 1",
+            (stable_id,),
+        ).fetchone()
+
     def has_submitted(self, stable_id: str) -> bool:
         cur = self.conn.execute(
             "SELECT 1 FROM applications WHERE stable_id = ? AND status = 'submitted' LIMIT 1",
