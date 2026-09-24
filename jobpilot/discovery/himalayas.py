@@ -51,6 +51,7 @@ def _as_int(value) -> int | None:
 class HimalayasAdapter(SourceAdapter):
     name = "himalayas"
     requires_tokens = False
+    hosts = ("himalayas.app",)
 
     def fetch(self) -> list[JobPosting]:
         country = str(self.option("country", "India"))

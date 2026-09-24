@@ -32,6 +32,7 @@ SEARCH_URL = "https://jobs.workable.com/api/v1/jobs"
 class WorkableGlobalAdapter(SourceAdapter):
     name = "workable_global"
     requires_tokens = False
+    hosts = ("jobs.workable.com",)
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []

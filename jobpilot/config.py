@@ -373,6 +373,43 @@ class ApplyConfig:
 
 
 @dataclass
+class RobotsConfig:
+    """The robots.txt gate in front of every automated discovery fetch.
+
+    Enabled by default: the gate is checked once per source host per run and
+    fails closed, so a host whose robots.txt cannot be read is not fetched. The
+    agent token is what jobpilot matches against a robots.txt ``User-agent``
+    line (``*`` is always also checked).
+    """
+
+    enabled: bool = True
+    agent: str = "jobpilot"
+    timeout: float = 12.0
+
+
+@dataclass
+class DeadlineConfig:
+    """How a posting deadline is surfaced (never used as a hard filter)."""
+
+    #: A deadline this many days away or fewer is "closing soon".
+    closing_soon_days: int = 7
+    #: A posting published longer ago than this is flagged stale.
+    stale_days: int = 30
+
+
+@dataclass
+class LifecycleConfig:
+    """Deterministic application lifecycle thresholds (no model calls)."""
+
+    #: An open application quiet for this many days is due a follow-up.
+    followup_days: int = 10
+    #: Never chase an application more than this many times.
+    max_reminders: int = 2
+    #: An open application quiet this long is swept to ``no_response``.
+    stale_days: int = 60
+
+
+@dataclass
 class LinkedInConfig:
     enabled: bool = False
     #: Target query list, not one generic word. A single ``intern`` keyword over
@@ -408,6 +445,9 @@ class Config:
     present: PresentConfig = field(default_factory=PresentConfig)
     apply: ApplyConfig = field(default_factory=ApplyConfig)
     linkedin: LinkedInConfig = field(default_factory=LinkedInConfig)
+    robots: RobotsConfig = field(default_factory=RobotsConfig)
+    deadline: DeadlineConfig = field(default_factory=DeadlineConfig)
+    lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
     link_out: LinkOutConfig = field(default_factory=LinkOutConfig)
     config_path: str = ""
     base_dir: str = ""
@@ -503,6 +543,12 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         _update_dataclass(cfg.apply, raw["apply"])
     if "linkedin" in raw:
         _update_dataclass(cfg.linkedin, raw["linkedin"])
+    if "robots" in raw:
+        _update_dataclass(cfg.robots, raw["robots"])
+    if "deadline" in raw:
+        _update_dataclass(cfg.deadline, raw["deadline"])
+    if "lifecycle" in raw:
+        _update_dataclass(cfg.lifecycle, raw["lifecycle"])
     _overlay_sources(cfg, raw)
     _overlay_link_out(cfg, raw)
     return cfg

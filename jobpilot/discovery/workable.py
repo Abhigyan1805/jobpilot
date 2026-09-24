@@ -12,6 +12,7 @@ BOARD_URL = "https://apply.workable.com/api/v1/widget/accounts/{token}?details=t
 
 class WorkableAdapter(SourceAdapter):
     name = "workable"
+    hosts = ("apply.workable.com",)
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []

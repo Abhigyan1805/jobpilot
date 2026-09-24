@@ -14,6 +14,7 @@ BOARD_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=tru
 
 class GreenhouseAdapter(SourceAdapter):
     name = "greenhouse"
+    hosts = ("boards-api.greenhouse.io",)
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []

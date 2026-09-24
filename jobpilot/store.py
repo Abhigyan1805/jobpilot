@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS postings (
     location TEXT,
     employment_type TEXT,
     published_at TEXT,
+    deadline TEXT,
     description TEXT,
     is_remote INTEGER,
     eligible INTEGER,
@@ -73,6 +74,10 @@ CREATE TABLE IF NOT EXISTS applications (
     resume_pages INTEGER,
     resume_page_limit INTEGER,
     outcome TEXT,
+    reminders INTEGER DEFAULT 0,
+    last_followup_at TEXT,
+    archive_dir TEXT,
+    notes TEXT,
     error TEXT,
     created_at TEXT,
     submitted_at TEXT,
@@ -145,6 +150,15 @@ def today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def _append_note(existing: str | None, note: str) -> str:
+    """Append a dated note, never overwriting history."""
+    text = (existing or "").strip()
+    if not note:
+        return text
+    entry = f"{utcnow()} {note.strip()}"
+    return f"{text}\n{entry}" if text else entry
+
+
 class Store:
     def __init__(self, path: str | Path):
         self.path = str(path)
@@ -172,6 +186,14 @@ class Store:
             self.conn.execute("ALTER TABLE applications ADD COLUMN resume_pages INTEGER")
         if "resume_page_limit" not in cols:
             self.conn.execute("ALTER TABLE applications ADD COLUMN resume_page_limit INTEGER")
+        if "reminders" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN reminders INTEGER DEFAULT 0")
+        if "last_followup_at" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN last_followup_at TEXT")
+        if "archive_dir" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN archive_dir TEXT")
+        if "notes" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN notes TEXT")
         rq_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(review_queue)")}
         if "matched_keywords" not in rq_cols:
             self.conn.execute("ALTER TABLE review_queue ADD COLUMN matched_keywords TEXT")
@@ -182,6 +204,8 @@ class Store:
         posting_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(postings)")}
         if "apply_email" not in posting_cols:
             self.conn.execute("ALTER TABLE postings ADD COLUMN apply_email TEXT")
+        if "deadline" not in posting_cols:
+            self.conn.execute("ALTER TABLE postings ADD COLUMN deadline TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -203,9 +227,9 @@ class Store:
             """
             INSERT INTO postings (
                 stable_id, source, job_id, company, title, url, apply_url, apply_email,
-                location, employment_type, published_at, description, is_remote, eligible,
+                location, employment_type, published_at, deadline, description, is_remote, eligible,
                 window_label, window_confidence, reject_reasons, seen_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(stable_id) DO UPDATE SET
                 company=excluded.company,
                 title=excluded.title,
@@ -215,6 +239,7 @@ class Store:
                 location=excluded.location,
                 employment_type=excluded.employment_type,
                 published_at=excluded.published_at,
+                deadline=COALESCE(excluded.deadline, postings.deadline),
                 description=excluded.description,
                 is_remote=excluded.is_remote,
                 eligible=COALESCE(excluded.eligible, postings.eligible),
@@ -235,6 +260,7 @@ class Store:
                 posting.location,
                 posting.employment_type,
                 posting.published_at,
+                posting.deadline or None,
                 posting.description,
                 None if posting.is_remote is None else int(posting.is_remote),
                 None if eligible is None else int(eligible),
@@ -329,6 +355,68 @@ class Store:
             "ORDER BY id DESC LIMIT 1",
             (stable_id,),
         ).fetchone()
+
+    def get_application(self, app_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+
+    def latest_application(self, stable_id: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM applications WHERE stable_id = ? ORDER BY id DESC LIMIT 1",
+            (stable_id,),
+        ).fetchone()
+
+    def latest_applications(self) -> list[sqlite3.Row]:
+        """One row per posting: the most recent application record."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM applications WHERE id IN "
+                "(SELECT MAX(id) FROM applications GROUP BY stable_id) ORDER BY updated_at DESC"
+            ).fetchall()
+        )
+
+    def approved_stable_ids(self) -> set[str]:
+        """Postings whose review-queue item a human approved for submission."""
+        return {
+            row["stable_id"]
+            for row in self.conn.execute(
+                "SELECT DISTINCT stable_id FROM review_queue WHERE status = 'approved'"
+            ).fetchall()
+        }
+
+    def set_archive_dir(self, stable_id: str, path: str) -> None:
+        self.conn.execute(
+            "UPDATE applications SET archive_dir = ? WHERE id = "
+            "(SELECT id FROM applications WHERE stable_id = ? ORDER BY id DESC LIMIT 1)",
+            (path, stable_id),
+        )
+        self.conn.commit()
+
+    def set_outcome(self, stable_id: str, outcome: str, note: str = "") -> sqlite3.Row | None:
+        """Record the human outcome for the latest application of a posting."""
+        row = self.latest_application(stable_id)
+        if row is None:
+            return None
+        notes = _append_note(row["notes"], note)
+        self.conn.execute(
+            "UPDATE applications SET outcome=?, notes=?, updated_at=? WHERE id=?",
+            (outcome, notes, utcnow(), row["id"]),
+        )
+        self.conn.commit()
+        return self.get_application(row["id"])
+
+    def record_followup(self, stable_id: str, note: str = "") -> sqlite3.Row | None:
+        """Log one follow-up reminder against the latest application."""
+        row = self.latest_application(stable_id)
+        if row is None:
+            return None
+        notes = _append_note(row["notes"], note)
+        self.conn.execute(
+            "UPDATE applications SET reminders=COALESCE(reminders, 0)+1, last_followup_at=?, "
+            "notes=?, updated_at=? WHERE id=?",
+            (utcnow(), notes, utcnow(), row["id"]),
+        )
+        self.conn.commit()
+        return self.get_application(row["id"])
 
     def has_submitted(self, stable_id: str) -> bool:
         cur = self.conn.execute(

@@ -132,6 +132,7 @@ def parse_search_html(markup: str) -> list[dict]:
 class LinkedInAdapter(SourceAdapter):
     name = "linkedin"
     requires_tokens = False
+    hosts = ("www.linkedin.com",)
 
     def fetch(self) -> list[JobPosting]:
         cfg = self.config.linkedin

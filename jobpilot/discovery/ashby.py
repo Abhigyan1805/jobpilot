@@ -12,6 +12,7 @@ BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompen
 
 class AshbyAdapter(SourceAdapter):
     name = "ashby"
+    hosts = ("api.ashbyhq.com",)
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []

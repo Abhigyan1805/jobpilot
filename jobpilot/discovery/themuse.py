@@ -43,6 +43,7 @@ def _as_int(value) -> int | None:
 class TheMuseAdapter(SourceAdapter):
     name = "themuse"
     requires_tokens = False
+    hosts = ("www.themuse.com",)
 
     def fetch(self) -> list[JobPosting]:
         location = str(self.option("location", "India"))

@@ -53,6 +53,7 @@ DEFAULT_KEYWORDS = (
 class UnstopAdapter(SourceAdapter):
     name = "unstop"
     requires_tokens = False
+    hosts = ("unstop.com",)
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []
