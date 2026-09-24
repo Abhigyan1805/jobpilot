@@ -14,6 +14,7 @@ style template, so the visual style is preserved exactly.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -71,6 +72,34 @@ def latex_escape(text: str) -> str:
     for src, dst in _UNICODE_MAP.items():
         escaped = escaped.replace(src, dst)
     return escaped
+
+
+def latex_safe_text(text: str) -> str:
+    """Escape text and drop characters pdflatex has no glyph for.
+
+    ``latex_escape`` preserves a document's Unicode punctuation but leaves other
+    non-ASCII characters untouched. pdflatex can only typeset ASCII plus a small
+    set of mapped symbols, so a posting title or company in another script (a
+    Cyrillic title was observed) makes the compile fail with "Unicode character
+    ... not set up for use with LaTeX". This variant folds accented Latin to its
+    base letter and replaces any remaining non-ASCII character with a space, so
+    the document still compiles. It only removes or decomposes characters and
+    never adds one, so the no-invention guarantee is unaffected. Use it for text
+    that originates outside the (English) master profile, such as a posting's
+    title and company.
+    """
+    decomposed = unicodedata.normalize("NFKD", str(text))
+    out: list[str] = []
+    for ch in decomposed:
+        if unicodedata.combining(ch):
+            continue
+        if ch in _LATEX_SPECIALS:
+            out.append(_LATEX_SPECIALS[ch])
+        elif ord(ch) < 128:
+            out.append(ch)
+        else:
+            out.append(_UNICODE_MAP.get(ch, " "))
+    return re.sub(r"[ \t]{2,}", " ", "".join(out)).strip()
 
 
 @dataclass

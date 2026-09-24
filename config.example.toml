@@ -59,10 +59,15 @@ enabled = true
 max_pages = 1
 # keyword_max_pages = 1
 
-# Unstop: India-native; robots.txt explicitly allows /api/public/*.
+# Unstop: India-native; robots.txt explicitly allows /api/public/*. The generic
+# internships feed is recency-sorted and non-technical-dominated, so the
+# server-side searchTerm keyword filter is run as well; the generic feed and one
+# query per keyword are merged and deduped by id. Override the keyword list:
 [sources.unstop]
 enabled = true
 max_pages = 2
+# keyword_max_pages = 1
+# keywords = ["machine learning", "artificial intelligence", "ai", "data science", "software engineer"]
 
 # Workable's cross-company search (distinct from the per-account widget above).
 # Undocumented endpoint; keep request rates low (robots sets ai-train=no).
@@ -96,13 +101,22 @@ enabled = true
 # Optional, disabled by default. Read-only, never authenticates, never applies.
 # NOTE: reading LinkedIn this way is against their Terms of Service and is
 # best-effort; it may stop working at any time. See README.
+# keywords is a list of target queries (a single generic "intern" word returned
+# only generic listings); each query is paged, then merged and deduped by id.
+# The request rate stays deliberately low.
 [linkedin]
 enabled = false
-keywords = "intern"
+keywords = [
+    "machine learning intern",
+    "AI intern",
+    "data science intern",
+    "research intern",
+    "software engineer intern",
+]
 location = "India"
-max_pages = 1
+max_pages = 2
 requests_per_second = 0.2
-max_results = 25
+max_results = 100
 
 # ---------------------------------------------------------------------------
 # Hard filters

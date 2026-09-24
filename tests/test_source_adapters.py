@@ -289,7 +289,7 @@ class UnstopTests(unittest.TestCase):
 
     def test_fetch_skips_finished_and_stops_on_last_page(self):
         cfg = test_config()
-        adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=5), cfg)
+        adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=5, keywords=[]), cfg)
         payload = {
             "data": {
                 "data": [dict(self.ROW), {**self.ROW, "id": 2, "status": "FINISHED"}],
@@ -301,6 +301,73 @@ class UnstopTests(unittest.TestCase):
             postings = adapter.fetch()
         self.assertEqual([p.job_id for p in postings], ["1617053"])
         self.assertEqual(fetch.call_count, 1)
+
+    def test_fetch_runs_generic_feed_and_searchterm_slices_and_dedupes(self):
+        cfg = test_config()
+        adapter = UnstopAdapter(
+            _source(cfg, "unstop", max_pages=1, keywords=["machine learning", "data science"]), cfg
+        )
+        generic_row = {**self.ROW, "id": 100, "title": "Marketing Internship"}
+        ml_row = {**self.ROW, "id": 200, "title": "Machine Learning Internship"}
+        ds_row = {**self.ROW, "id": 300, "title": "Data Science Internship"}
+        urls: list[str] = []
+
+        def fake(url, **kwargs):
+            urls.append(url)
+            if "searchTerm=machine+learning" in url:
+                # one row overlaps the generic feed; only the new row counts
+                return {"data": {"data": [dict(generic_row), ml_row], "last_page": 1}}
+            if "searchTerm=data+science" in url:
+                return {"data": {"data": [ds_row], "last_page": 1}}
+            return {"data": {"data": [generic_row], "last_page": 1}}
+
+        with mock.patch("jobpilot.discovery.unstop.fetch_json", side_effect=fake):
+            postings = adapter.fetch()
+
+        self.assertEqual([p.job_id for p in postings], ["100", "200", "300"])
+        self.assertTrue(any("searchTerm=machine+learning" in u for u in urls))
+        self.assertTrue(any("searchTerm=data+science" in u for u in urls))
+        self.assertEqual(adapter.query_counts["generic feed"], 1)
+        self.assertEqual(adapter.query_counts["searchTerm=machine learning"], 1)
+        self.assertEqual(adapter.query_counts["searchTerm=data science"], 1)
+
+    def test_fetch_dedupes_repeated_rows_across_pages(self):
+        # Regression G5: the generic feed repeated rows across pages (300 rows,
+        # 252 unique ids); the adapter must dedupe by its own id before returning.
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=3, keywords=[]), cfg)
+        full_page = [{**self.ROW, "id": i} for i in range(10)]
+        payload = {"data": {"data": full_page, "last_page": 3}}
+
+        with mock.patch("jobpilot.discovery.unstop.fetch_json", return_value=payload):
+            postings = adapter.fetch()
+        self.assertEqual(len(postings), 10)
+        self.assertEqual(len({p.job_id for p in postings}), 10)
+        self.assertEqual(adapter.query_counts["generic feed"], 10)
+
+    def test_searchterm_failure_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=1, keywords=["ai"]), cfg)
+        generic = {**self.ROW, "id": 100, "title": "Marketing Internship"}
+
+        def fake(url, **kwargs):
+            if "searchTerm=ai" in url:
+                raise FetchError("searchTerm endpoint outage")
+            return {"data": {"data": [generic], "last_page": 1}}
+
+        with mock.patch("jobpilot.discovery.unstop.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], ["100"])
+        self.assertEqual(outcome.query_counts["searchTerm=ai"], 0)
+
+    def test_all_queries_failing_raises(self):
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=1, keywords=["ai"]), cfg)
+        with mock.patch("jobpilot.discovery.unstop.fetch_json", side_effect=FetchError("down")):
+            outcome = adapter.fetch_safe()
+        self.assertFalse(outcome.ok)
+        self.assertIn("down", outcome.error)
 
 
 class WorkableGlobalTests(unittest.TestCase):

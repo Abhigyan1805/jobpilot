@@ -6,6 +6,14 @@ touches any account. It runs at a deliberately low rate and degrades gracefully:
 any block, redirect to a sign-in wall, or shape change is reported as a source
 error and the pipeline falls back to the ATS sources.
 
+A single generic ``intern`` keyword over one page fetched only about ten
+unrelated listings, so the reader now runs a *configurable list of target
+queries* (``[linkedin].keywords``), pages each a few times, and merges and
+de-duplicates the results by LinkedIn's own job id. A failure in one query is
+reported but never fails the adapter; only a total failure raises. The request
+rate stays deliberately low (``requests_per_second``) and each query's
+contribution is recorded in ``query_counts`` so the coverage gain is visible.
+
 Honest limitation: reading LinkedIn this way is against LinkedIn's Terms of
 Service and is best-effort. It may stop working at any time. It is disabled by
 default; enable it only with that understanding.
@@ -18,7 +26,7 @@ import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
-from jobpilot.discovery.base import SourceAdapter
+from jobpilot.discovery.base import SourceAdapter, string_list
 from jobpilot.htmlutil import clean_whitespace
 from jobpilot.http import FetchError, fetch_text
 from jobpilot.models import JobPosting
@@ -129,64 +137,77 @@ class LinkedInAdapter(SourceAdapter):
         max_pages = int(self.option("max_pages", cfg.max_pages))
         max_results = int(self.option("max_results", cfg.max_results))
         interval = 1.0 / max(cfg.requests_per_second, 0.05)
+        location = self._q(self.option("location", cfg.location))
+        queries = string_list(self.option("keywords", cfg.keywords))
+
         postings: list[JobPosting] = []
         seen: set[str] = set()
-        last_error = ""
-        for page in range(max_pages):
-            url = (
-                f"{SEARCH_URL}?keywords={self._q(self.option('keywords', cfg.keywords))}"
-                f"&location={self._q(self.option('location', cfg.location))}"
-                f"&start={page * 10}"
-            )
-            try:
-                markup = fetch_text(
-                    url,
-                    timeout=float(cfg.timeout),
-                    retries=1,
-                    limiter=self.limiter,
-                    headers={"Accept": "text/html"},
-                )
-            except Exception as exc:  # noqa: BLE001 - degrade gracefully
-                last_error = f"{type(exc).__name__}: {exc}"
-                break
-            time.sleep(interval)
-
-            cards = parse_search_html(markup)
-            if not cards:
-                if page == 0 and ("authwall" in markup or "sign in" in markup.lower()):
-                    last_error = "linkedin returned a sign-in wall; source unavailable"
-                elif page == 0:
-                    last_error = "no cards parsed (shape change or empty result)"
-                break
-
-            for card in cards:
-                jid = card.get("job_id")
-                if not jid or jid in seen:
-                    continue
-                seen.add(jid)
-                postings.append(
-                    JobPosting(
-                        source=self.name,
-                        job_id=jid,
-                        company=card.get("company", ""),
-                        title=card.get("title", ""),
-                        url=urljoin("https://www.linkedin.com", card.get("url", "")),
-                        apply_url=urljoin("https://www.linkedin.com", card.get("url", "")),
-                        location=card.get("location", ""),
-                        description="",
-                        employment_type="",
-                        published_at=card.get("posted", ""),
-                        is_remote=("remote" in card.get("location", "").lower()) or None,
-                        raw=card,
+        errors: list[str] = []
+        sign_in_wall = False
+        for query in queries:
+            contributed = 0
+            for page in range(max_pages):
+                url = f"{SEARCH_URL}?keywords={self._q(query)}&location={location}&start={page * 10}"
+                try:
+                    markup = fetch_text(
+                        url,
+                        timeout=float(cfg.timeout),
+                        retries=1,
+                        limiter=self.limiter,
+                        headers={"Accept": "text/html"},
                     )
-                )
+                except Exception as exc:  # noqa: BLE001 - one query must not fail the adapter
+                    errors.append(f"{query}: {type(exc).__name__}: {exc}")
+                    break
+                time.sleep(interval)
+
+                cards = parse_search_html(markup)
+                if not cards:
+                    if page == 0 and ("authwall" in markup or "sign in" in markup.lower()):
+                        errors.append("linkedin returned a sign-in wall; source unavailable")
+                        sign_in_wall = True
+                    elif page == 0:
+                        errors.append(f"{query}: no cards parsed (shape change or empty result)")
+                    break
+
+                new_this_page = 0
+                for card in cards:
+                    jid = card.get("job_id")
+                    if not jid or jid in seen:
+                        continue
+                    seen.add(jid)
+                    postings.append(
+                        JobPosting(
+                            source=self.name,
+                            job_id=jid,
+                            company=card.get("company", ""),
+                            title=card.get("title", ""),
+                            url=urljoin("https://www.linkedin.com", card.get("url", "")),
+                            apply_url=urljoin("https://www.linkedin.com", card.get("url", "")),
+                            location=card.get("location", ""),
+                            description="",
+                            employment_type="",
+                            published_at=card.get("posted", ""),
+                            is_remote=("remote" in card.get("location", "").lower()) or None,
+                            raw=card,
+                        )
+                    )
+                    contributed += 1
+                    new_this_page += 1
+                    if len(postings) >= max_results:
+                        break
+                if new_this_page == 0:
+                    # A page whose rows were all already seen means we have
+                    # reached the overlap; paging further only wastes requests.
+                    break
                 if len(postings) >= max_results:
                     break
-            if len(postings) >= max_results:
+            self.query_counts[f"keywords={query}"] = contributed
+            if sign_in_wall or len(postings) >= max_results:
                 break
 
-        if not postings and last_error:
-            raise FetchError(last_error)
+        if not postings and errors:
+            raise FetchError("; ".join(errors))
         return postings
 
     @staticmethod

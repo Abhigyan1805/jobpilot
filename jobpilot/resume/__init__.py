@@ -4,6 +4,7 @@ from jobpilot.resume.generator import (
     ResumeGenerator,
     RenderedResume,
     latex_escape,
+    latex_safe_text,
     slugify,
 )
 from jobpilot.resume.parseability import (
@@ -19,6 +20,7 @@ __all__ = [
     "ResumeGenerator",
     "RenderedResume",
     "latex_escape",
+    "latex_safe_text",
     "slugify",
     "TextExtractionError",
     "check_parseability",

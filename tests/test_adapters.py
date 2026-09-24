@@ -1,12 +1,15 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+from urllib.parse import unquote
 
-from jobpilot.config import load_config
+from jobpilot.config import SourceConfig, load_config
 from jobpilot.discovery.base import SourceAdapter
-from jobpilot.discovery.linkedin import parse_search_html
+from jobpilot.discovery.linkedin import LinkedInAdapter, parse_search_html
 from jobpilot.discovery.localfile import LocalFileAdapter
 from jobpilot.discovery.registry import build_adapters, discover
+from jobpilot.http import FetchError
 from tests.helpers import test_config
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo_postings.json"
@@ -115,6 +118,149 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(cfg.profile.path, "p.md")
             # untouched values keep their defaults
             self.assertEqual(cfg.filter.window_start_month, 1)
+
+
+def _card(jid, title="Machine Learning Intern", company="Acme", location="Bengaluru, India"):
+    return (
+        f'<div class="base-card base-search-card job-search-card" data-entity-urn="urn:li:jobPosting:{jid}">'
+        f'<a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/x-{jid}"></a>'
+        f'<h3 class="base-search-card__title">{title}</h3>'
+        f'<h4 class="base-search-card__subtitle">{company}</h4>'
+        f'<span class="job-search-card__location">{location}</span>'
+        f"</div>"
+    )
+
+
+class LinkedInFetchTests(unittest.TestCase):
+    """The reader runs a configurable query list, merges and dedupes by job id,
+    and reports each query's contribution."""
+
+    def _adapter(self, cfg):
+        source = cfg.sources.get("linkedin") or SourceConfig(name="linkedin", enabled=True)
+        cfg.sources["linkedin"] = source
+        return LinkedInAdapter(source, cfg)
+
+    @staticmethod
+    def _query(url: str) -> str:
+        return unquote(url).split("keywords=")[1].split("&")[0]
+
+    def test_runs_every_query_and_dedupes_by_job_id(self):
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
+        cfg.linkedin.max_pages = 2
+        adapter = self._adapter(cfg)
+
+        def fake(url, **kwargs):
+            if self._query(url) == "machine learning intern":
+                return _card("111") + _card("222")
+            return _card("222") + _card("333")  # 222 overlaps the first query
+
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=fake), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            postings = adapter.fetch()
+
+        self.assertEqual([p.job_id for p in postings], ["111", "222", "333"])
+        self.assertEqual(adapter.query_counts["keywords=machine learning intern"], 2)
+        self.assertEqual(adapter.query_counts["keywords=AI intern"], 1)
+
+    def test_scalar_keyword_still_works_as_one_query(self):
+        cfg = test_config()
+        cfg.linkedin.keywords = "intern"  # legacy single-keyword config
+        adapter = self._adapter(cfg)
+
+        def fake(url, **kwargs):
+            return _card("111")
+
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=fake), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            postings = adapter.fetch()
+
+        self.assertEqual([p.job_id for p in postings], ["111"])
+        self.assertEqual(adapter.query_counts, {"keywords=intern": 1})
+
+    def test_one_query_failure_does_not_fail_the_adapter(self):
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
+        adapter = self._adapter(cfg)
+
+        def fake(url, **kwargs):
+            if self._query(url) == "AI intern":
+                raise FetchError("query outage")
+            return _card("111")
+
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=fake), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            outcome = adapter.fetch_safe()
+
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], ["111"])
+        self.assertEqual(outcome.query_counts["keywords=AI intern"], 0)
+
+    def test_all_queries_failing_raises(self):
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
+        adapter = self._adapter(cfg)
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=FetchError("down")), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            outcome = adapter.fetch_safe()
+        self.assertFalse(outcome.ok)
+        self.assertIn("down", outcome.error)
+
+    def test_sign_in_wall_aborts_without_hammering_every_query(self):
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern", "data science intern"]
+        adapter = self._adapter(cfg)
+        with mock.patch(
+            "jobpilot.discovery.linkedin.fetch_text", return_value="<html>authwall sign in</html>"
+        ) as fetch, mock.patch("jobpilot.discovery.linkedin.time.sleep"):
+            outcome = adapter.fetch_safe()
+        self.assertFalse(outcome.ok)
+        self.assertIn("sign-in wall", outcome.error)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_max_results_caps_the_merged_total(self):
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
+        cfg.linkedin.max_results = 2
+        adapter = self._adapter(cfg)
+
+        def fake(url, **kwargs):
+            return "".join(_card(str(100 + i)) for i in range(5))
+
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=fake), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            postings = adapter.fetch()
+        self.assertEqual(len(postings), 2)
+
+
+class SourceReportingTests(unittest.TestCase):
+    def test_per_query_counts_are_printed(self):
+        import contextlib
+        import io
+
+        from jobpilot.cli import _print_source_outcomes
+        from jobpilot.discovery.base import FetchOutcome
+        from jobpilot.models import JobPosting
+        from jobpilot.pipeline import PipelineResult
+
+        outcome = FetchOutcome(
+            source="linkedin",
+            postings=[
+                JobPosting(source="linkedin", job_id="1", company="Acme", title="ML Intern", url="u")
+            ],
+            query_counts={"keywords=machine learning intern": 7, "keywords=AI intern": 3},
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_source_outcomes(PipelineResult(source_outcomes=[outcome]))
+        text = buf.getvalue()
+        self.assertIn("keywords=machine learning intern: 7 new", text)
+        self.assertIn("keywords=AI intern: 3 new", text)
 
 
 if __name__ == "__main__":
