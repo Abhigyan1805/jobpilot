@@ -1,8 +1,10 @@
+import http.server
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlparse
 
 from jobpilot.config import SourceConfig, load_config
 from jobpilot.discovery.base import SourceAdapter
@@ -129,6 +131,48 @@ def _card(jid, title="Machine Learning Intern", company="Acme", location="Bengal
         f'<span class="job-search-card__location">{location}</span>'
         f"</div>"
     )
+
+
+class _FixtureServer:
+    """A real localhost HTTP server for LinkedIn guest-search HTML.
+
+    The adapter's network layer is *not* stubbed: it builds a URL, issues a real
+    ``urllib`` GET, and parses the response. ``responder(query, start)`` returns
+    ``(status, body)`` for each request and every request is recorded so a test
+    can prove which pages and queries were actually fetched.
+    """
+
+    def __init__(self, responder):
+        self.responder = responder
+        self.requests: list[tuple[str, int]] = []
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):  # keep test output quiet
+                pass
+
+            def do_GET(self):
+                params = parse_qs(urlparse(self.path).query)
+                query = params.get("keywords", [""])[0]
+                start = int(params.get("start", ["0"])[0])
+                outer.requests.append((query, start))
+                status, body = outer.responder(query, start)
+                payload = body.encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/jobs"
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
 
 
 class LinkedInFetchTests(unittest.TestCase):
@@ -293,6 +337,82 @@ class LinkedInFetchTests(unittest.TestCase):
         ):
             postings = adapter.fetch()
         self.assertEqual(len(postings), 2)
+
+    def _run_over_http(self, cfg, responder, keywords, max_pages):
+        """Drive the public fetch_safe() against a real localhost HTTP server."""
+        cfg.linkedin.keywords = keywords
+        cfg.linkedin.max_pages = max_pages
+        adapter = self._adapter(cfg)
+        server = _FixtureServer(responder)
+        self.addCleanup(server.close)
+        with mock.patch("jobpilot.discovery.linkedin.SEARCH_URL", server.url), mock.patch("time.sleep"):
+            return adapter, server, adapter.fetch_safe()
+
+    def test_live_http_pages_a_query_whose_first_page_is_fully_duplicate(self):
+        # Scenario 1: query B's page 0 is entirely duplicates of query A over
+        # real HTTP; B must still be paged so its unique page-1 ids are fetched,
+        # not abandoned as exhausted.
+        def responder(query, start):
+            if query == "machine learning intern":
+                return 200, _card("1") + _card("2") if start == 0 else _card("3") + _card("4")
+            return 200, _card("1") + _card("2") if start == 0 else _card("5") + _card("6")
+
+        adapter, server, outcome = self._run_over_http(
+            test_config(), responder, ["machine learning intern", "AI intern"], 2
+        )
+
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual([p.job_id for p in outcome.postings], ["1", "2", "3", "4", "5", "6"])
+        self.assertEqual(adapter.query_counts["keywords=AI intern"], 2)
+        self.assertIn(("AI intern", 10), server.requests)
+
+    def test_live_http_partial_page_failure_keeps_cards_and_reports_it(self):
+        # Scenario 2: page 0 returns cards but page 1 fails over real HTTP. The
+        # already-parsed cards survive and both failures stay visible.
+        def responder(query, start):
+            if start == 0:
+                return 200, _card("1") + _card("2") if query == "machine learning intern" else _card("3") + _card("4")
+            return 500, "<html>rate limited</html>"
+
+        adapter, _server, outcome = self._run_over_http(
+            test_config(), responder, ["machine learning intern", "AI intern"], 2
+        )
+
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual([p.job_id for p in outcome.postings], ["1", "2", "3", "4"])
+        self.assertEqual(adapter.query_counts["keywords=machine learning intern"], 2)
+        self.assertEqual(adapter.query_counts["keywords=AI intern"], 2)
+        self.assertIn("500", outcome.query_errors["keywords=machine learning intern"])
+        self.assertIn("500", outcome.query_errors["keywords=AI intern"])
+
+    def test_live_http_sign_in_wall_aborts_without_hammering_every_query(self):
+        # Scenario 3: a real sign-in wall on the first query aborts the run
+        # immediately, without iterating the remaining configured queries.
+        def responder(query, start):
+            return 200, "<html>authwall sign in</html>"
+
+        _adapter_obj, server, outcome = self._run_over_http(
+            test_config(), responder, ["machine learning intern", "AI intern", "data science intern"], 1
+        )
+
+        self.assertFalse(outcome.ok)
+        self.assertIn("sign-in wall", outcome.error)
+        self.assertEqual(server.requests, [("machine learning intern", 0)])
+
+    def test_live_http_all_queries_failing_raises_only_when_nothing_fetched(self):
+        # Scenario 4: every query fails and no posting was fetched, so the
+        # source is reported failed rather than silently empty.
+        def responder(query, start):
+            return 503, "<html>down</html>"
+
+        _adapter_obj, server, outcome = self._run_over_http(
+            test_config(), responder, ["machine learning intern", "AI intern"], 1
+        )
+
+        self.assertFalse(outcome.ok)
+        self.assertIn("503", outcome.error)
+        self.assertEqual(outcome.postings, [])
+        self.assertTrue(server.requests)
 
 
 class SourceReportingTests(unittest.TestCase):
