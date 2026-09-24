@@ -58,7 +58,6 @@ class UnstopAdapter(SourceAdapter):
         postings: list[JobPosting] = []
         seen: set[str] = set()
         errors: list[str] = []
-        ok = False
         max_pages = int(self.option("max_pages", 2))
         keyword_pages = int(self.option("keyword_max_pages", 1))
         opportunity = str(self.option("opportunity", "internships"))
@@ -69,8 +68,6 @@ class UnstopAdapter(SourceAdapter):
         if generic_error:
             self.query_errors["generic feed"] = generic_error
             errors.append(f"generic: {generic_error}")
-        else:
-            ok = True
 
         for term in keywords:
             rows, error = self._run_query(opportunity, keyword_pages, search_term=term)
@@ -79,10 +76,8 @@ class UnstopAdapter(SourceAdapter):
             if error:
                 self.query_errors[label] = error
                 errors.append(f"{term}: {error}")
-            else:
-                ok = True
 
-        if not ok and errors:
+        if not postings and errors:
             raise FetchError("; ".join(errors))
         return postings
 

@@ -144,12 +144,10 @@ class LinkedInAdapter(SourceAdapter):
         postings: list[JobPosting] = []
         seen: set[str] = set()
         errors: list[str] = []
-        succeeded = False
         sign_in_wall = False
         for query in queries:
             contributed = 0
             label = f"keywords={query}"
-            query_failed = False
             for page in range(max_pages):
                 url = f"{SEARCH_URL}?keywords={self._q(query)}&location={location}&start={page * 10}"
                 try:
@@ -164,7 +162,6 @@ class LinkedInAdapter(SourceAdapter):
                     message = f"{type(exc).__name__}: {exc}"
                     self.query_errors[label] = message
                     errors.append(f"{query}: {message}")
-                    query_failed = True
                     break
                 time.sleep(interval)
 
@@ -175,12 +172,10 @@ class LinkedInAdapter(SourceAdapter):
                         self.query_errors[label] = message
                         errors.append(message)
                         sign_in_wall = True
-                        query_failed = True
                     elif page == 0:
                         message = "no cards parsed (shape change or empty result)"
                         self.query_errors[label] = message
                         errors.append(f"{query}: {message}")
-                        query_failed = True
                     break
 
                 for card in cards:
@@ -210,12 +205,10 @@ class LinkedInAdapter(SourceAdapter):
                 if len(postings) >= max_results:
                     break
             self.query_counts[label] = contributed
-            if not query_failed:
-                succeeded = True
             if sign_in_wall or len(postings) >= max_results:
                 break
 
-        if not succeeded and errors:
+        if not postings and errors:
             raise FetchError("; ".join(errors))
         return postings
 

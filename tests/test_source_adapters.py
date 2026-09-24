@@ -363,6 +363,30 @@ class UnstopTests(unittest.TestCase):
         self.assertIn("searchTerm endpoint outage", outcome.query_errors["searchTerm=ai"])
         self.assertNotIn("generic feed", outcome.query_errors)
 
+    def test_partial_page_failure_keeps_fetched_rows_and_reports_it(self):
+        # Regression: rows fetched from an early page must survive a later
+        # page failure, even when every query (generic and searchTerm) has a
+        # failure recorded, and that failure must remain visible.
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=2, keywords=["ai"]), cfg)
+        full_page = [{**self.ROW, "id": 100 + i} for i in range(10)]
+
+        def fake(url, **kwargs):
+            if "searchTerm=ai" in url:
+                raise FetchError("searchTerm outage")
+            if "page=1" in url:
+                return {"data": {"data": full_page, "last_page": 5}}
+            raise FetchError("rate limited")
+
+        with mock.patch("jobpilot.discovery.unstop.fetch_json", side_effect=fake):
+            outcome = adapter.fetch_safe()
+
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], [str(100 + i) for i in range(10)])
+        self.assertEqual(outcome.query_counts["generic feed"], 10)
+        self.assertIn("rate limited", outcome.query_errors["generic feed"])
+        self.assertIn("searchTerm outage", outcome.query_errors["searchTerm=ai"])
+
     def test_all_queries_failing_raises(self):
         cfg = test_config()
         adapter = UnstopAdapter(_source(cfg, "unstop", max_pages=1, keywords=["ai"]), cfg)

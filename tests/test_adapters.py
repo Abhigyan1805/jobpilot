@@ -226,6 +226,36 @@ class LinkedInFetchTests(unittest.TestCase):
         self.assertIn("query outage", outcome.query_errors["keywords=AI intern"])
         self.assertNotIn("keywords=machine learning intern", outcome.query_errors)
 
+    def test_partial_page_failure_keeps_fetched_cards_and_reports_it(self):
+        # Regression: a query whose page 0 returns cards but whose later page
+        # fails must not discard the cards already parsed, and the failure must
+        # stay visible even when no query completes every page.
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
+        cfg.linkedin.max_pages = 2
+        adapter = self._adapter(cfg)
+
+        def fake(url, **kwargs):
+            query = self._query(url)
+            start = int(unquote(url).split("start=")[1].split("&")[0])
+            if start == 0:
+                if query == "machine learning intern":
+                    return _card("1") + _card("2")
+                return _card("3") + _card("4")
+            raise FetchError("rate limited")
+
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=fake), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            outcome = adapter.fetch_safe()
+
+        self.assertTrue(outcome.ok)
+        self.assertEqual([p.job_id for p in outcome.postings], ["1", "2", "3", "4"])
+        self.assertEqual(outcome.query_counts["keywords=machine learning intern"], 2)
+        self.assertEqual(outcome.query_counts["keywords=AI intern"], 2)
+        self.assertIn("rate limited", outcome.query_errors["keywords=machine learning intern"])
+        self.assertIn("rate limited", outcome.query_errors["keywords=AI intern"])
+
     def test_all_queries_failing_raises(self):
         cfg = test_config()
         cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
