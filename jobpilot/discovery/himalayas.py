@@ -70,18 +70,25 @@ class HimalayasAdapter(SourceAdapter):
 
         postings, typed_error = self._run_query(typed_params)
         ok = typed_error == ""
-        errors = [f"typed: {typed_error}"] if typed_error else []
+        errors = []
+        if typed_error:
+            errors.append(f"typed: {typed_error}")
+            self.query_errors["typed"] = typed_error
         for term in keywords:
             params = base_params()
             params["q"] = str(term)
+            label = f"q={term}"
             try:
                 more, error = self._run_query(params)
             except Exception as exc:  # noqa: BLE001 - a secondary query must never fail the adapter
-                errors.append(f"{term}: {type(exc).__name__}: {exc}")
+                message = f"{type(exc).__name__}: {exc}"
+                errors.append(f"{term}: {message}")
+                self.query_errors[label] = message
                 continue
             postings.extend(more)
             if error:
                 errors.append(f"{term}: {error}")
+                self.query_errors[label] = error
             else:
                 ok = True
 

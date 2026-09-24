@@ -1,11 +1,16 @@
 """Tests for the widened discovery adapters and the typed fields they carry.
 
-No network: every adapter's ``fetch_json`` is patched with a captured fixture so
-the tests exercise URL construction, pagination and normalisation only.
+Most tests patch ``fetch_json`` with a captured fixture so they can assert URL
+construction and normalisation directly. The Himalayas first-page tests instead
+drive the real network layer against a localhost HTTP server, so the requests
+that actually leave the process are recorded.
 """
 
 from __future__ import annotations
 
+import http.server
+import json
+import threading
 import unittest
 from unittest import mock
 
@@ -30,6 +35,44 @@ def _source(cfg: Config, name: str, **options):
     source = cfg.sources[name]
     source.options = dict(options)
     return source
+
+
+class _JsonFixtureServer:
+    """A real localhost HTTP server that records each requested path.
+
+    ``responder(path)`` returns ``(status, payload)``. The adapter's network
+    layer is not stubbed: it builds a URL, issues a real ``urllib`` GET and
+    parses the JSON, so a test can assert on the exact requests that were made.
+    """
+
+    def __init__(self, responder):
+        self.responder = responder
+        self.requests: list[str] = []
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):  # keep test output quiet
+                pass
+
+            def do_GET(self):
+                outer.requests.append(self.path)
+                status, payload = outer.responder(self.path)
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/jobs/api/search"
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
 
 
 class HimalayasTests(unittest.TestCase):
@@ -241,6 +284,67 @@ class HimalayasTests(unittest.TestCase):
             store.close()
         self.assertEqual(outcome.action, "review")
         self.assertFalse(submitted)
+
+    def test_live_http_fetches_only_the_first_page_and_never_sends_page(self):
+        # Drive the real network layer against a localhost server: every query
+        # must be one request with no `page` parameter, even though the board
+        # reports many pages available.
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", keyword="intern"), cfg)
+        page = [{"guid": f"g{i}", "title": "Intern", "employmentType": "Intern"} for i in range(20)]
+        server = _JsonFixtureServer(lambda path: (200, {"totalCount": 116, "jobs": page}))
+        self.addCleanup(server.close)
+
+        with mock.patch("jobpilot.discovery.himalayas.SEARCH_URL", server.url):
+            outcome = adapter.fetch_safe()
+
+        self.assertTrue(outcome.ok, outcome.error)
+        # Typed + one keyword query, one page each; dedupe by job id keeps 20.
+        self.assertEqual(len(server.requests), 2)
+        self.assertEqual(len(outcome.postings), 20)
+        self.assertTrue(all("page=" not in request for request in server.requests))
+        self.assertTrue(
+            all("employment_type=Intern" in r or "q=intern" in r for r in server.requests)
+        )
+
+    def test_live_http_partial_query_failure_stays_visible(self):
+        # Over the real network, a failing secondary query must not abort the
+        # adapter but its failure must remain visible on the outcome.
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", keyword="intern"), cfg)
+        typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
+
+        def responder(path):
+            if "employment_type=Intern" in path:
+                return 200, {"totalCount": 1, "jobs": [typed]}
+            return 500, {"error": "rate limited"}
+
+        server = _JsonFixtureServer(responder)
+        self.addCleanup(server.close)
+
+        with mock.patch("jobpilot.discovery.himalayas.SEARCH_URL", server.url), mock.patch(
+            "jobpilot.http.time.sleep"
+        ):
+            outcome = adapter.fetch_safe()
+
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual([p.job_id for p in outcome.postings], ["typed-1"])
+        self.assertIn("q=intern", outcome.query_errors)
+        self.assertIn("500", outcome.query_errors["q=intern"])
+
+    def test_live_http_all_queries_failing_raises_with_the_details(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", keyword="intern"), cfg)
+        server = _JsonFixtureServer(lambda path: (503, {"error": "board outage"}))
+        self.addCleanup(server.close)
+
+        with mock.patch("jobpilot.discovery.himalayas.SEARCH_URL", server.url), mock.patch(
+            "jobpilot.http.time.sleep"
+        ):
+            outcome = adapter.fetch_safe()
+
+        self.assertFalse(outcome.ok)
+        self.assertIn("503", outcome.error)
 
 
 class UnstopTests(unittest.TestCase):
