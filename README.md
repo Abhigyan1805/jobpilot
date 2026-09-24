@@ -203,7 +203,7 @@ resume content and never submits.
 Once you apply, the tracker keeps working. On an auto-submission or a
 `queue approve`, the exact submitted materials (resume/cover PDFs and their
 `.tex` sources) plus the posting text are archived to
-`out/<applications>/<company>-<title>-<hash>/`; an existing file is never
+`out/applications/<company>-<title>-<hash>/`; an existing file is never
 overwritten, so the archive always holds the version that was actually sent.
 `outcome.md` records the current status.
 
