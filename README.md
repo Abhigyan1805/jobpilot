@@ -163,7 +163,12 @@ actually look at the roles and choose, rather than read a list. One card per
 match, ordered by score, with company, title, location, window evidence, the
 match score, the matched skills versus the gaps, the direct apply link, and the
 tailored resume and cover letter embedded beside the card (the PDFs are copied
-into `out/present/assets/` and linked relatively). Every card states the safety
+into `out/present/assets/` and linked relatively). The card's obvious click opens
+the tailored resume: the **job title** and the **Open tailored resume PDF**
+button both link to `assets/<slug>/resume.pdf` in a new tab, as plain relative
+anchors that work straight from disk (no server, no JavaScript). The posting link
+is a separate, clearly-labelled **Apply / view posting** button, so "read the
+resume I generated" and "go to the posting" cannot be confused. Every card states the safety
 state: nothing was submitted, and whether the role is auto-apply eligible or
 review-only, with the reason. A role is auto-apply eligible only when it is in
 the strong band *and* the pipeline queued it for a transient reason (daily cap,
@@ -409,7 +414,7 @@ facet would have excluded is still discovered and filtered.
 | **Lever** | `api.lever.co/v0/postings/{token}?mode=json` | Documented postings endpoint; carries each job's typed `commitment` for the shared filter and never drops on it, so a genuine intern a board tags `Fulltime` still reaches review. Only boards whose token you configure. |
 | **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; carries each job's typed `employmentType` for the shared filter; never drops on it. Only configured tokens. |
 | **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Carries each row's typed `employment_type` for the shared filter; never drops on it. |
-| **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` plus a `q=intern` keyword pass | Free, no key; integer `page` pagination (20/page). The typed `employment_type=Intern` slice is a high-precision path, not the only one: a `q=intern` keyword query is merged in and deduplicated by guid so a mis-tagged intern is still discovered. Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
+| **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` plus a `q=intern` keyword pass | Free, no key. **Only the first page of each query is requested, and no `page` parameter is ever sent**, because the board's published policy disallows the paged path (`Disallow: /jobs*&page=`) and the enforced robots gate honours it per concrete URL. The typed `employment_type=Intern` slice is a high-precision path, not the only one: a `q=intern` keyword query is merged in and deduplicated by guid so a mis-tagged intern is still discovered. Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
 | **Unstop** | `unstop.com/api/public/opportunity/search-result?opportunity=internships&page=N` plus one `searchTerm=<keyword>` pass per configured keyword | India-native live internship feed (~10,000 rows); its `robots.txt` explicitly allows `/api/public/*`. 10/page. The generic feed is recency-sorted and non-technical-dominated, so the API's server-side `searchTerm` keyword filter is run as a high-precision slice too; the generic feed and each keyword pass are merged and deduped by Unstop's own id. Typed `start_date`/`end_date` are mapped into the window check; a lone date is left as "unknown window" (review-only). |
 | **Workable** (global search) | `jobs.workable.com/api/v1/jobs?query=intern&location=India` | **Undocumented** cross-company search; paginates with an opaque `pageToken`. `robots.txt` sets `ai-train=no` (data must not be used for model training). Its `employmentType` is unreliable, so it relies on Workable's own server-side `query=intern` search. |
 | **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` plus a `location=India` pass without `level` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. That typed slice is not the only path: the API ignores keyword parameters, so a broader `location=India` query without the level facet is merged in and deduplicated by id. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
@@ -433,7 +438,7 @@ an empty body is allow-all, and a 404 means no published policy (permitted).
 | Greenhouse | `boards-api.greenhouse.io` | readable, permits the path |
 | Lever | `api.lever.co` | readable, permits the path |
 | Workable (per-account) | `apply.workable.com` | readable, permits the path |
-| **Himalayas** | `himalayas.app` | **readable, but `Disallow: /jobs*&page=` blocks the paged search API (`...&page=N`), so the fetch is skipped** |
+| **Himalayas** | `himalayas.app` | readable, permits the first-page search path (the adapter sends no `page` parameter); the paged path (`...&page=N`) is disallowed and never requested |
 | Unstop | `unstop.com` | readable, permits the path |
 | Workable (global) | `jobs.workable.com` | readable, permits the path |
 | The Muse | `www.themuse.com` | readable, permits the path |
@@ -447,12 +452,15 @@ would use is the documented way to read a board, but jobpilot never overrides an
 unreadable policy. Set `[robots].enabled = false` to disable gating globally
 (not recommended).
 
-Himalayas is not fetched by default either, for a different and equally
-intended reason: its published policy contains `Disallow: /jobs*&page=`, which
-matches the `...&page=N` search API the adapter calls. Because the gate is
-evaluated against the concrete request path, that paged request is refused even
-though the host root is allowed. The path-specific rule is working as intended;
-it is not an oversight.
+Himalayas' published policy contains `Disallow: /jobs*&page=`, which matches the
+`...&page=N` paged search API. Because the gate is evaluated against the concrete
+request path, a paged request would be refused even though the host root is
+allowed. Rather than override the rule, the adapter requests only the **first
+page** of each query and omits the `page` parameter entirely, which both avoids
+the disallowed pattern and is permitted by the policy (`/jobs/api/search?...`
+without `&page=`). Paging is deliberately not attempted, and no per-host
+exception is carved out. The path-specific rule is working as intended; it is
+not an oversight.
 
 ### Link-out sources (manual only, never scraped)
 

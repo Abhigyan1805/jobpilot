@@ -365,6 +365,11 @@ h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
 .role h2 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
 .role .company { color: var(--accent); font-weight: 600; }
 .role .title { color: var(--ink); }
+.role h2 a.title-link {
+  color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px;
+  text-decoration-color: var(--accent); text-underline-offset: 3px;
+}
+.role h2 a.title-link:hover { color: var(--accent); }
 .score {
   text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
@@ -401,6 +406,7 @@ h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
   font-size: 14px; font-weight: 600; border: 1px solid var(--accent); color: #fff; background: var(--accent);
   overflow-wrap: anywhere;
 }
+.btn.apply { background: var(--ink); border-color: var(--ink); }
 .pdfs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 14px; margin-top: 16px; min-width: 0; }
 .pdf { min-width: 0; }
 .pdf h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 8px; }
@@ -485,19 +491,39 @@ def _render_card(
     c = match.candidate
     css = "card borderline" if match.borderline else "card"
     domains = ", ".join(f"{name}={score:.2f}" for name, score in match.domain_scores.items())
+    resume_rel = f"{assets_rel}/{slug}/resume.pdf" if resume_name else ""
+    cover_rel = f"{assets_rel}/{slug}/cover_letter.pdf" if cover_name else ""
     note = ""
     if match.borderline and match.borderline_note:
         note = f'<div class="note">Borderline: {_esc(match.borderline_note)}.</div>'
 
+    # The tailored resume is the card's primary affordance: the job title opens
+    # it, and so does the first action button. The posting link stays a separate,
+    # clearly-labelled button so "read the resume I generated" and "go to the
+    # posting" cannot be confused. Both are plain relative anchors, so they work
+    # when index.html is opened straight from disk (no server, no JavaScript).
+    if resume_rel:
+        title_html = (
+            f'<a class="title-link" href="{_esc(resume_rel)}" target="_blank" rel="noopener" '
+            f'title="Open the tailored resume PDF">{_esc(c.title)}</a>'
+        )
+    else:
+        title_html = _esc(c.title)
+
+    resume_action = ""
+    if resume_rel:
+        resume_action = (
+            f'<a class="btn resume" href="{_esc(resume_rel)}" target="_blank" rel="noopener">'
+            f"Open tailored resume PDF \u2197</a>"
+        )
+
     pdfs = []
     if resume_name:
-        rel = f"{assets_rel}/{slug}/resume.pdf"
-        pdfs.append(_pdf_block("Tailored resume", rel))
+        pdfs.append(_pdf_block("Tailored resume", resume_rel))
     else:
         pdfs.append('<div class="pdf"><h3>Tailored resume</h3><p class="missing">No resume PDF was produced.</p></div>')
     if cover_name:
-        rel = f"{assets_rel}/{slug}/cover_letter.pdf"
-        pdfs.append(_pdf_block("Cover letter", rel))
+        pdfs.append(_pdf_block("Cover letter", cover_rel))
     else:
         pdfs.append('<div class="pdf"><h3>Cover letter</h3><p class="missing">No cover letter PDF was produced.</p></div>')
 
@@ -506,7 +532,7 @@ def _render_card(
       <div class="card-head">
         <div class="rank">#{rank}</div>
         <div class="role">
-          <h2><span class="company">{_esc(c.company)}</span> <span class="title">— {_esc(c.title)}</span></h2>
+          <h2><span class="company">{_esc(c.company)}</span> <span class="title">— {title_html}</span></h2>
         </div>
         <div class="score">
           <span class="num">{c.score:.3f}</span>
@@ -537,7 +563,8 @@ def _render_card(
         <span><b>{_esc(match.route_label)}</b> — {_esc(match.safety_detail)}</span>
       </div>
       <div class="actions">
-        <a class="btn" href="{_esc(c.apply_url)}" target="_blank" rel="noopener">Apply / view posting ↗</a>
+        {resume_action}
+        <a class="btn apply" href="{_esc(c.apply_url)}" target="_blank" rel="noopener">Apply / view posting ↗</a>
         <span class="apply-url">{_esc(c.apply_url)}</span>
       </div>
       <div class="pdfs">{"".join(pdfs)}</div>

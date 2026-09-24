@@ -53,11 +53,11 @@ tokens = ["skillshare"]
 
 # Himalayas: global remote board. A typed employment_type=Intern query plus a
 # broader q=intern keyword query are merged (deduped by guid): the typed facet
-# is a precision slice, never the only discovery path.
+# is a precision slice, never the only discovery path. Only the first page of
+# each query is fetched and no `page` parameter is sent: the paged API path is
+# robots-disallowed (`Disallow: /jobs*&page=`), so paging is not attempted.
 [sources.himalayas]
 enabled = true
-max_pages = 1
-# keyword_max_pages = 1
 
 # Unstop: India-native; robots.txt explicitly allows /api/public/*. The generic
 # internships feed is recency-sorted and non-technical-dominated, so the

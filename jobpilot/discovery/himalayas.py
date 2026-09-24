@@ -5,12 +5,19 @@ Endpoint verified live on 2026-09-21/22:
     GET https://himalayas.app/jobs/api/search?employment_type=Intern&country=India
     GET https://himalayas.app/jobs/api/search?q=intern&country=India
 
-Returns ``{jobs: [...], totalCount, page, limit}`` and paginates with an integer
-``page`` parameter (20 per page). The API is free and needs no key. Himalayas'
-terms require a visible link back to himalayas.app and the attribution "data
-sourced from Himalayas"; they also forbid republishing its jobs to
-LinkedIn/Google Jobs/Jooble/Neuvoo. This adapter only reads the feed and records
-the attribution in each posting's raw payload.
+Returns ``{jobs: [...], totalCount, page, limit}`` (20 per page). The API is free
+and needs no key. Himalayas' terms require a visible link back to himalayas.app
+and the attribution "data sourced from Himalayas"; they also forbid republishing
+its jobs to LinkedIn/Google Jobs/Jooble/Neuvoo. This adapter only reads the feed
+and records the attribution in each posting's raw payload.
+
+Only the **first page** of each query is fetched, and no ``page`` parameter is
+sent. Himalayas' published policy disallows the paged API path
+(``Disallow: /jobs*&page=``), which the enforced robots gate in
+:mod:`jobpilot.http` honours per concrete request URL, so a ``page=N`` request
+is refused before it leaves the process. Omitting the parameter requests the
+first page directly and avoids the disallowed pattern entirely; paging is
+deliberately not attempted and no per-host exception is carved out.
 
 The typed ``employment_type=Intern`` query is high precision but drops a genuine
 internship the board mis-tags (e.g. ``employmentType`` of ``Full Time``), so it
@@ -31,7 +38,6 @@ from jobpilot.http import FetchError, fetch_json
 from jobpilot.models import JobPosting
 
 SEARCH_URL = "https://himalayas.app/jobs/api/search"
-PAGE_SIZE = 20
 
 
 def _iso(timestamp) -> str:
@@ -39,13 +45,6 @@ def _iso(timestamp) -> str:
         return datetime.fromtimestamp(float(timestamp), tz=timezone.utc).replace(microsecond=0).isoformat()
     except (TypeError, ValueError, OSError, OverflowError):
         return str(timestamp or "")
-
-
-def _as_int(value) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 class HimalayasAdapter(SourceAdapter):
@@ -69,14 +68,14 @@ class HimalayasAdapter(SourceAdapter):
         keyword = self.option("keyword", "intern")
         keywords = [str(keyword)] if keyword else []
 
-        postings, typed_error = self._run_query(typed_params, int(self.option("max_pages", 1)))
+        postings, typed_error = self._run_query(typed_params)
         ok = typed_error == ""
         errors = [f"typed: {typed_error}"] if typed_error else []
         for term in keywords:
             params = base_params()
             params["q"] = str(term)
             try:
-                more, error = self._run_query(params, int(self.option("keyword_max_pages", 1)))
+                more, error = self._run_query(params)
             except Exception as exc:  # noqa: BLE001 - a secondary query must never fail the adapter
                 errors.append(f"{term}: {type(exc).__name__}: {exc}")
                 continue
@@ -90,27 +89,20 @@ class HimalayasAdapter(SourceAdapter):
             raise FetchError("; ".join(errors))
         return dedupe_postings(postings)
 
-    def _run_query(self, params: dict[str, str], max_pages: int) -> tuple[list[JobPosting], str]:
-        postings: list[JobPosting] = []
-        for page in range(1, max_pages + 1):
-            query = dict(params)
-            query["page"] = page
-            url = f"{SEARCH_URL}?{urlencode(query)}"
-            try:
-                data = fetch_json(url, timeout=float(self.option("timeout", 20)), limiter=self.limiter)
-            except FetchError as exc:
-                return postings, f"page {page}: {exc}"
-            jobs = data.get("jobs") or [] if isinstance(data, dict) else []
-            if not jobs:
-                break
-            for job in jobs:
-                postings.append(self._normalise(job))
-            if len(jobs) < PAGE_SIZE:
-                break
-            total = _as_int(data.get("totalCount"))
-            if total is not None and page * PAGE_SIZE >= total:
-                break
-        return postings, ""
+    def _run_query(self, params: dict[str, str]) -> tuple[list[JobPosting], str]:
+        """Fetch the first page of one query.
+
+        The ``page`` parameter is never sent: ``Disallow: /jobs*&page=`` forbids
+        the paged path, so requesting page 1 *without* the parameter is the only
+        lawful request the adapter can make. It therefore never pages.
+        """
+        url = f"{SEARCH_URL}?{urlencode(params)}"
+        try:
+            data = fetch_json(url, timeout=float(self.option("timeout", 20)), limiter=self.limiter)
+        except FetchError as exc:
+            return [], str(exc)
+        jobs = data.get("jobs") or [] if isinstance(data, dict) else []
+        return [self._normalise(job) for job in jobs], ""
 
     def _normalise(self, job: dict) -> JobPosting:
         restrictions = [str(x) for x in (job.get("locationRestrictions") or []) if x]

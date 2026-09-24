@@ -290,6 +290,27 @@ class RenderTests(unittest.TestCase):
         self.assertEqual([p.name for p in copied], ["cover_letter.pdf", "resume.pdf"])
         self.assertTrue(all(p.read_bytes().startswith(b"%PDF") for p in copied))
 
+    def test_card_title_and_primary_action_open_the_tailored_resume_pdf(self):
+        selection = self._selection()
+        index = render_page(selection, self.cfg, Path(self.tmp.name) / "present")
+        html = index.read_text(encoding="utf-8")
+
+        # The job title is a plain relative anchor to the copied resume PDF, so
+        # the obvious click opens the resume even from file:// with no server.
+        self.assertRegex(
+            html, r'<a class="title-link" href="assets/[^"]+/resume\.pdf" target="_blank"'
+        )
+        # The card's primary action button opens the same resume PDF.
+        self.assertRegex(
+            html, r'<a class="btn resume" href="assets/[^"]+/resume\.pdf" target="_blank"'
+        )
+        # The posting link is a separate, clearly-labelled button - not the same
+        # affordance as "read the resume I generated".
+        self.assertIn('class="btn apply"', html)
+        self.assertIn('href="https://example.com/apply/ml"', html)
+        # Works with no JavaScript at all.
+        self.assertNotIn("<script", html)
+
     def test_render_empty_selection_says_so_honestly(self):
         index = render_page(SelectionResult(), self.cfg, Path(self.tmp.name) / "present")
         html = index.read_text(encoding="utf-8")
@@ -310,6 +331,9 @@ class RenderTests(unittest.TestCase):
         self.assertIn("No resume PDF was produced.", html)
         self.assertIn("No cover letter PDF was produced.", html)
         self.assertNotIn("<iframe", html)
+        # With no resume there is no browser affordance to open one.
+        self.assertNotIn('class="title-link"', html)
+        self.assertNotIn('class="btn resume"', html)
 
     def test_strong_band_window_review_is_labelled_review_only(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))

@@ -66,28 +66,43 @@ class HimalayasTests(unittest.TestCase):
         self.assertEqual(posting.location, "Worldwide")
         self.assertIs(posting.is_remote, True)
 
-    def test_fetch_paginates_with_page_param(self):
+    def test_fetch_reads_only_the_first_page_without_a_page_param(self):
+        # Himalayas' robots.txt disallows the paged API path (/jobs*&page=), which
+        # the shared gate enforces against the concrete URL. The adapter must
+        # therefore request page 1 *without* a page parameter and never page.
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=3, keyword=""), cfg)
-        pages = {
-            1: [{"guid": f"g{i}", "title": "Intern", "employmentType": "Intern"} for i in range(20)],
-            2: [{"guid": "g20", "title": "Intern", "employmentType": "Intern"}],
-        }
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", keyword=""), cfg)
+        urls: list[str] = []
 
         def fake(url, **kwargs):
-            page = int(url.split("page=")[1].split("&")[0])
-            return {"totalCount": 21, "jobs": pages.get(page, [])}
+            urls.append(url)
+            return {"totalCount": 100, "jobs": [{"guid": "g1", "title": "Intern", "employmentType": "Intern"}]}
 
         with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake) as fetch:
             postings = adapter.fetch()
-        self.assertEqual(len(postings), 21)
-        self.assertEqual(fetch.call_count, 2)
-        self.assertIn("employment_type=Intern", fetch.call_args_list[0].args[0])
-        self.assertIn("country=India", fetch.call_args_list[0].args[0])
+        self.assertEqual([p.job_id for p in postings], ["g1"])
+        self.assertEqual(fetch.call_count, 1)
+        self.assertNotIn("page=", urls[0])
+        self.assertIn("employment_type=Intern", urls[0])
+        self.assertIn("country=India", urls[0])
+
+    def test_no_query_ever_sends_the_disallowed_page_param(self):
+        cfg = test_config()
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
+        urls: list[str] = []
+
+        def fake(url, **kwargs):
+            urls.append(url)
+            return {"totalCount": 0, "jobs": []}
+
+        with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=fake):
+            adapter.fetch()
+        self.assertEqual(len(urls), 2)
+        self.assertTrue(all("page=" not in url for url in urls))
 
     def test_fetch_runs_typed_and_keyword_queries_and_merges(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
         keyword = {"guid": "kw-1", "title": "Machine Learning Intern", "employmentType": "Full Time"}
         urls: list[str] = []
@@ -108,7 +123,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_scalar_keyword_issues_one_request_not_one_per_character(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1, keyword="ml intern"), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas", keyword="ml intern"), cfg)
         keyword_urls: list[str] = []
 
         def fake(url, **kwargs):
@@ -123,7 +138,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_secondary_query_parse_error_does_not_fail_the_adapter(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
         full_page = [
             {"guid": f"kw-{i}", "title": "ML Intern", "employmentType": "Full Time"}
@@ -142,7 +157,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_secondary_query_non_fetch_error_does_not_fail_the_adapter(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
 
         def fake(url, **kwargs):
@@ -157,7 +172,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_fetch_deduplicates_rows_returned_by_both_queries(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         row = {"guid": "same-1", "title": "ML Intern", "employmentType": "Intern"}
 
         def fake(url, **kwargs):
@@ -169,7 +184,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_secondary_query_failure_does_not_fail_the_adapter(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         typed = {"guid": "typed-1", "title": "Data Intern", "employmentType": "Intern"}
 
         def fake(url, **kwargs):
@@ -184,7 +199,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_fetch_safe_isolates_a_source_failure(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         with mock.patch("jobpilot.discovery.himalayas.fetch_json", side_effect=FetchError("board outage")):
             outcome = adapter.fetch_safe()
         self.assertFalse(outcome.ok)
@@ -192,7 +207,7 @@ class HimalayasTests(unittest.TestCase):
 
     def test_fulltime_tagged_ml_intern_is_discovered_and_routes_to_review(self):
         cfg = test_config()
-        adapter = HimalayasAdapter(_source(cfg, "himalayas", max_pages=1), cfg)
+        adapter = HimalayasAdapter(_source(cfg, "himalayas"), cfg)
         mis_tagged = {
             "guid": "ml-1",
             "title": "Machine Learning Intern",
