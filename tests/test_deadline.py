@@ -106,6 +106,30 @@ class ExtractDeadlineTests(unittest.TestCase):
     def test_cue_without_a_date_yields_nothing(self):
         self.assertEqual(self._extract("Deadline: rolling admissions."), "")
 
+    def test_newline_between_cue_and_date_is_not_a_sentence_boundary(self):
+        self.assertEqual(self._extract("Deadline:\nMarch 15, 2026"), "2026-03-15")
+        self.assertEqual(self._extract("Apply by\nMarch 15, 2026"), "2026-03-15")
+
+    def test_abbreviated_month_is_not_a_sentence_boundary(self):
+        self.assertEqual(self._extract("Apply by Mar. 15, 2026."), "2026-03-15")
+        self.assertEqual(self._extract("Application deadline: Sept. 15, 2026."), "2026-09-15")
+
+    def test_explicit_close_outranks_the_opening_date(self):
+        self.assertEqual(
+            self._extract("Applications open January 1, 2026 and close February 1, 2026."),
+            "2026-02-01",
+        )
+        self.assertEqual(
+            self._extract("Applications open 2026-01-01 and close 2026-02-01."),
+            "2026-02-01",
+        )
+
+    def test_non_application_closure_is_not_a_deadline(self):
+        self.assertEqual(
+            self._extract("Our office closes on December 25, 2026 for the holidays. We are hiring interns."),
+            "",
+        )
+
     def test_extraction_does_not_make_the_window_verified(self):
         p = posting(
             description="Machine learning internship. Applications accepted 2025-01-05 through 2025-05-30."

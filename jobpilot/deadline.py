@@ -44,23 +44,26 @@ MONTHS = {
 _MONTH_ALT = "|".join(sorted(MONTHS, key=len, reverse=True))
 
 # Phrases that introduce the *application* deadline, never the internship window.
-# These are explicit: an explicit application cue always outranks the generic
-# closure cue below.
+# These are explicit: an explicit close/deadline cue always outranks the weak
+# opening cue below.
 _APPLICATION_CUE_RE = re.compile(
     r"(?:"
     r"appl(?:y|ies|ication|ications)\s+(?:by|before|no\s+later\s+than)"
     r"|deadline(?:\s+(?:for|to)\s+apply(?:ing)?)?"
     r"|last\s+date\s+(?:to\s+apply|of\s+application|for\s+application)"
     r"|applications?\s+(?:close|closes|closing|are\s+closed)"
-    rf"|applications?\s+(?:are\s+)?(?:accepted|open|available)(?=\s+(?:\d|(?:{_MONTH_ALT})))"
     r"|(?:accepted|open|available)\s+(?:until|till|through|up\s+to)"
     r")",
     re.IGNORECASE,
 )
-# A generic closure phrase ("the office closes on ..."). It is only consulted
-# when no explicit application cue yielded a date, so it cannot report a
-# non-application closure as the deadline.
-_GENERIC_CUE_RE = re.compile(r"closes?\s+(?:on|by)", re.IGNORECASE)
+# A weak cue marks an *opening* date ("applications open January 1"). It is
+# consulted only after every explicit cue failed, and when a later date in the
+# same window is joined by a range or closing connector ("open January 1 through
+# February 1" / "open January 1 and close February 1") that later date wins.
+_OPEN_CUE_RE = re.compile(
+    rf"applications?\s+(?:are\s+)?(?:accepted|open|available)(?=\s+(?:\d|(?:{_MONTH_ALT})))",
+    re.IGNORECASE,
+)
 _ISO_RE = re.compile(r"\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b")
 _MONTH_FIRST_RE = re.compile(
     rf"\b({_MONTH_ALT})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{{2}})\b",
@@ -73,10 +76,14 @@ _DAY_FIRST_RE = re.compile(
 # A connector that directly joins two dates states a range ("A to B"); only then
 # is the later date the deadline. Any intervening words break the range.
 _RANGE_CONNECTOR_RE = re.compile(r"\s*(?:-|–|—|through|until|till|to)\s*", re.IGNORECASE)
+# An opening date followed directly by a closing phrase ("A and close B") states
+# the closing date as the deadline.
+_CLOSE_CONNECTOR_RE = re.compile(r"\s*(?:,|and)?\s*clos(?:e|es|ing|ed)(?:\s+on)?\s*", re.IGNORECASE)
 # A cue's date lives in its own sentence: a following sentence (typically the
 # internship's own start/end window) is never scanned, so a weak cue cannot pick
-# up the window's end date.
-_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|\n")
+# up the window's end date. A line break or a month abbreviation's period
+# ("Mar.", "Sept.") is not a sentence boundary, so a stated deadline survives.
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 # How far after a cue to look for its date.
 _LOOKAHEAD = 90
 
@@ -139,9 +146,10 @@ def _pick(candidates: list[tuple[int, int, date]], window: str) -> date | None:
         return candidates[0][2]
     first, last = candidates[0], candidates[-1]
     between = window[first[1]: last[0]]
-    # Only a connector that directly joins the two dates is a range ("A to B");
-    # a sentence or extra words in between (an internship window) is not.
-    if _RANGE_CONNECTOR_RE.fullmatch(between):
+    # Only a connector that directly joins the two dates is a range ("A to B") or
+    # an explicit closing ("A and close B"); a sentence or extra words in between
+    # (an internship window) is not.
+    if _RANGE_CONNECTOR_RE.fullmatch(between) or _CLOSE_CONNECTOR_RE.fullmatch(between):
         return last[2]
     return first[2]
 
@@ -151,14 +159,14 @@ def extract_deadline(posting: JobPosting) -> str:
 
     The cue phrase must be present, so a bare date in the body (an internship
     start/end window, a posted date) is never mistaken for a deadline. An
-    explicit application cue is tried first; the generic closure cue is only a
+    explicit application cue is tried first; the weak opening cue is only a
     fallback. A cue with no unambiguous date after it yields no deadline rather
     than a guess.
     """
     text = " ".join(part for part in [posting.description, posting.title] if part)
     if not text:
         return ""
-    for cue_re in (_APPLICATION_CUE_RE, _GENERIC_CUE_RE):
+    for cue_re in (_APPLICATION_CUE_RE, _OPEN_CUE_RE):
         for cue in cue_re.finditer(text):
             window = text[cue.end(): cue.end() + _LOOKAHEAD]
             window = _SENTENCE_BOUNDARY_RE.split(window, maxsplit=1)[0]

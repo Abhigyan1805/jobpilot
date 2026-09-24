@@ -39,11 +39,6 @@ class RobotsBlocked(FetchError):
 _robots_gate: RobotsGate | None = None
 
 
-def set_robots_gate(gate: RobotsGate | None) -> None:
-    global _robots_gate
-    _robots_gate = gate
-
-
 def get_robots_gate() -> RobotsGate | None:
     return _robots_gate
 
