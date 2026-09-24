@@ -2,7 +2,9 @@
 
 Turns the queued matches into a single self-contained HTML page the captain can
 browse and choose from - one card per match, ordered by score, each with the
-tailored resume and cover letter viewable beside the direct apply link.
+tailored resume and cover letter embedded beside the card. The card's obvious
+click opens the tailored resume (the job title and a dedicated action button);
+the posting link is a separate, clearly-labelled apply button.
 
 Selection is deliberately conservative and is *presentation only*: it filters
 and orders what the pipeline already produced. It never re-scores, never invents
