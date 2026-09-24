@@ -99,9 +99,10 @@ class HimalayasAdapter(SourceAdapter):
     def _run_query(self, params: dict[str, str]) -> tuple[list[JobPosting], str]:
         """Fetch the first page of one query.
 
-        The ``page`` parameter is never sent: ``Disallow: /jobs*&page=`` forbids
-        the paged path, so requesting page 1 *without* the parameter is the only
-        lawful request the adapter can make. It therefore never pages.
+        The adapter requests only the first page and never pages: it sends
+        neither a ``page`` parameter nor a cursor parameter. Omitting ``page``
+        avoids the one pattern the policy disallows (``Disallow: /jobs*&page=``),
+        so the request is lawful; paging is deliberately not attempted.
         """
         url = f"{SEARCH_URL}?{urlencode(params)}"
         try:
