@@ -123,8 +123,11 @@ class SourceAdapter(ABC):
         if self.requires_tokens and not self.tokens:
             return FetchOutcome(self.name, skipped=True, error="no board tokens configured")
         if self.robots is not None:
+            allow_unreadable = self.name in (self.config.robots.allow_unreadable_sources or [])
             for host in self.hosts:
-                verdict = self.robots.verdict(f"https://{host}")
+                verdict = self.robots.verdict(
+                    f"https://{host}", allow_unreadable=allow_unreadable
+                )
                 if not verdict.allowed:
                     return FetchOutcome(
                         self.name, skipped=True, error=f"robots gate: {verdict.reason}"

@@ -235,6 +235,16 @@ answers_file = "answers.toml"
 enabled = true
 agent = "jobpilot"
 timeout = 12.0
+# Per-source override for the narrow case where a host serves no readable
+# robots.txt but its API is documented for third-party consumption. It only
+# overrides an *unreadable* verdict; a readable robots.txt that disallows the
+# agent still blocks. Evidence for the default entry:
+#   api.ashbyhq.com/robots.txt returns HTTP 401 for every user agent (verified
+#   2026-09-24), while Ashby's public posting API
+#   (api.ashbyhq.com/posting-api/job-board/<token>) is the documented way to
+#   read a board; failing closed there would drop a legitimate source entirely.
+# Remove "ashby" to fail closed for it too.
+allow_unreadable_sources = ["ashby"]
 
 # ---------------------------------------------------------------------------
 # Deadline urgency and posting staleness (display only; never a hard filter)
