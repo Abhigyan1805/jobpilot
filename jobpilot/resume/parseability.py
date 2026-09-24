@@ -57,6 +57,22 @@ def extract_pdf_text(pdf_path: str, extractor: str, *, timeout: int = 60) -> str
     return proc.stdout
 
 
+def count_pages(text: str) -> int:
+    """Count pages in pdftotext output by its form-feed page separators.
+
+    pdftotext terminates every page with a form feed (``\\f``), including the
+    last, so the feed count is the page count; when a producer omits the final
+    separator we still count the trailing page. Deterministic and dependency-free
+    (the extractor is already invoked for the parseability check).
+    """
+    if not text:
+        return 0
+    feeds = text.count("\f")
+    if feeds == 0:
+        return 1
+    return feeds if text.endswith("\f") else feeds + 1
+
+
 def check_parseability(
     text: str,
     *,

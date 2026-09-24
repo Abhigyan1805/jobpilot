@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS applications (
     cover_pdf TEXT,
     cover_text TEXT,
     parseability_ok INTEGER,
+    resume_pages INTEGER,
+    resume_page_limit INTEGER,
     outcome TEXT,
     error TEXT,
     created_at TEXT,
@@ -94,6 +96,8 @@ CREATE TABLE IF NOT EXISTS review_queue (
     missing_keywords TEXT,
     resume_pdf TEXT,
     cover_pdf TEXT,
+    resume_pages INTEGER,
+    resume_page_limit INTEGER,
     packet_dir TEXT,
     status TEXT DEFAULT 'pending',
     created_at TEXT,
@@ -164,9 +168,17 @@ class Store:
                 "UPDATE applications SET review_category = review_reason "
                 "WHERE review_category IS NULL"
             )
+        if "resume_pages" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN resume_pages INTEGER")
+        if "resume_page_limit" not in cols:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN resume_page_limit INTEGER")
         rq_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(review_queue)")}
         if "matched_keywords" not in rq_cols:
             self.conn.execute("ALTER TABLE review_queue ADD COLUMN matched_keywords TEXT")
+        if "resume_pages" not in rq_cols:
+            self.conn.execute("ALTER TABLE review_queue ADD COLUMN resume_pages INTEGER")
+        if "resume_page_limit" not in rq_cols:
+            self.conn.execute("ALTER TABLE review_queue ADD COLUMN resume_page_limit INTEGER")
         posting_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(postings)")}
         if "apply_email" not in posting_cols:
             self.conn.execute("ALTER TABLE postings ADD COLUMN apply_email TEXT")
@@ -305,6 +317,19 @@ class Store:
                 return row
         return None
 
+    def latest_review_application(self, stable_id: str) -> sqlite3.Row | None:
+        """Return the current review route for a posting, if it was queued.
+
+        Every route to the review queue creates a ``manual_required`` application
+        row carrying the guard category and the human-readable reason, so the
+        presentation layer can report what the pipeline actually decided.
+        """
+        return self.conn.execute(
+            "SELECT * FROM applications WHERE stable_id = ? AND status = 'manual_required' "
+            "ORDER BY id DESC LIMIT 1",
+            (stable_id,),
+        ).fetchone()
+
     def has_submitted(self, stable_id: str) -> bool:
         cur = self.conn.execute(
             "SELECT 1 FROM applications WHERE stable_id = ? AND status = 'submitted' LIMIT 1",
@@ -329,9 +354,9 @@ class Store:
             INSERT INTO applications (
                 stable_id, company, title, url, apply_url, status, mode, score, gaps,
                 red_flags, adapter, review_reason, review_category, resume_tex, resume_pdf,
-                resume_text, cover_tex, cover_pdf, cover_text, parseability_ok, created_at,
-                updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                resume_text, cover_tex, cover_pdf, cover_text, parseability_ok,
+                resume_pages, resume_page_limit, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 p.stable_id,
@@ -354,6 +379,8 @@ class Store:
                 plan.cover.pdf_path if plan.cover else "",
                 plan.cover.text if plan.cover else "",
                 int(plan.resume.parseability_ok) if plan.resume else None,
+                int(plan.resume.page_count) if plan.resume else None,
+                int(plan.resume.page_limit) if plan.resume else None,
                 now,
                 now,
             ),
@@ -407,9 +434,9 @@ class Store:
             """
             INSERT INTO review_queue (
                 stable_id, source, company, title, url, apply_url, score, reasons,
-                gaps, matched_keywords, missing_keywords, resume_pdf, cover_pdf, packet_dir,
-                status, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending', ?)
+                gaps, matched_keywords, missing_keywords, resume_pdf, cover_pdf,
+                resume_pages, resume_page_limit, packet_dir, status, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending', ?)
             ON CONFLICT(stable_id) DO UPDATE SET
                 score=excluded.score,
                 reasons=excluded.reasons,
@@ -418,6 +445,8 @@ class Store:
                 missing_keywords=excluded.missing_keywords,
                 resume_pdf=excluded.resume_pdf,
                 cover_pdf=excluded.cover_pdf,
+                resume_pages=excluded.resume_pages,
+                resume_page_limit=excluded.resume_page_limit,
                 packet_dir=excluded.packet_dir
             """,
             (
@@ -434,6 +463,8 @@ class Store:
                 json.dumps(plan.missing_keywords),
                 plan.resume.pdf_path if plan.resume else "",
                 plan.cover.pdf_path if plan.cover else "",
+                int(plan.resume.page_count) if plan.resume else None,
+                int(plan.resume.page_limit) if plan.resume else None,
                 packet_dir,
                 now,
             ),

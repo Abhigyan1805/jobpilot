@@ -22,6 +22,7 @@ from jobpilot.resume.generator import ContentInvariantError, ResumeGenerator
 from jobpilot.resume.parseability import (
     TextExtractionError,
     check_parseability,
+    count_pages,
     extract_pdf_text,
 )
 from jobpilot.store import Store
@@ -279,19 +280,27 @@ def self_contained_tailor_apply(
 
     # --- tailored resume -------------------------------------------------
     try:
-        resume = generator.generate(posting, match, out_dir)
+        resume, page_ok = _generate_and_fit(config, posting, match, generator, out_dir)
         plan.resume = resume
-        pdf_path, log = compile_tex(
-            resume.tex_path,
-            config.profile.pdflatex,
-            timeout=int(config.profile.compile_timeout),
-        )
-        resume.pdf_path = pdf_path
-        resume.compile_log = log
         _run_parseability(config, resume, match, generator.profile)
         if config.match.require_parseable and not resume.parseability_ok:
             plan.requires_review = True
             plan.review_reason = f"parseability check failed: {resume.parseability_detail}"
+        if not page_ok:
+            # Not reducible to a readable one-page resume: queue it with the
+            # reason and flag it on the presentation card. Never silently ship an
+            # over-long or unreadable resume as ready.
+            plan.requires_review = True
+            if _within_page_limit(resume, config):
+                page_reason = (
+                    "resume layout is unreadable: a required section could not "
+                    "be extracted from the fitted PDF"
+                )
+            else:
+                page_reason = f"resume is {resume.page_count} pages, limit is {resume.page_limit}"
+            plan.review_reason = (
+                plan.review_reason + "; " if plan.review_reason else ""
+            ) + page_reason
     except CompileError as exc:
         plan.requires_review = True
         plan.review_reason = f"LaTeX compilation failed: {exc}"
@@ -331,6 +340,160 @@ def self_contained_tailor_apply(
     return plan, outcome
 
 
+# Deterministic reduction ladder for the one-page fit: the least relevant
+# bullets first, then whole projects. A variant is accepted only when it both
+# fits the page limit and is still readable (every required section extracts).
+# Spacing is never tightened: the style template's vertical layout is already
+# calibrated against its default list spacing, so compressing it overlaps entry
+# and section headings and makes the page unreadable. Reduction therefore only
+# removes content. Attempts are bounded by ``profile.resume_fit_attempts``.
+_FIT_VARIANTS: tuple[tuple[int, int], ...] = (
+    (2, 0),
+    (4, 0),
+    (6, 0),
+    (8, 0),
+    (8, 1),
+    (8, 2),
+    (8, 3),
+)
+
+
+def _fit_variant(attempt: int) -> tuple[int, int]:
+    index = max(0, min(attempt - 1, len(_FIT_VARIANTS) - 1))
+    return _FIT_VARIANTS[index]
+
+
+def _within_page_limit(resume, config: Config) -> bool:
+    limit = int(getattr(config.profile, "resume_page_limit", 0) or 0)
+    if limit <= 0 or resume.page_count <= 0:
+        return True
+    return resume.page_count <= limit
+
+
+def _readable(resume, config: Config) -> bool:
+    """True when every required section still extracts from the fitted PDF.
+
+    A variant that has reduced away a required section is not a genuine resume,
+    so the fit loop rejects it and keeps reducing content instead of shipping an
+    incomplete page. Reduction protects one bullet per entry and at least one
+    project, so this is a safety net rather than the common path.
+    """
+    sections = list(config.match.required_sections)
+    if not sections or not resume.extracted_text:
+        return True
+    ok, _detail = check_parseability(
+        resume.extracted_text,
+        required_sections=sections,
+        required_keywords=[],
+        min_keyword_survival=0.0,
+    )
+    return ok
+
+
+def _render_compile_measure(
+    config: Config,
+    posting: JobPosting,
+    match,
+    generator: ResumeGenerator,
+    out_dir: str,
+    *,
+    drop_bullets: int,
+    drop_projects: int,
+):
+    """Render one variant, compile it and measure its page count."""
+    resume = generator.generate(
+        posting,
+        match,
+        out_dir,
+        drop_bullets=drop_bullets,
+        drop_projects=drop_projects,
+    )
+    pdf_path, log = compile_tex(
+        resume.tex_path,
+        config.profile.pdflatex,
+        timeout=int(config.profile.compile_timeout),
+    )
+    resume.pdf_path = pdf_path
+    resume.compile_log = log
+    try:
+        resume.extracted_text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
+    except TextExtractionError:
+        resume.extracted_text = ""
+    resume.page_count = count_pages(resume.extracted_text)
+    return resume
+
+
+def _generate_and_fit(
+    config: Config,
+    posting: JobPosting,
+    match,
+    generator: ResumeGenerator,
+    out_dir: str,
+):
+    """Generate a tailored resume and enforce ``profile.resume_page_limit``.
+
+    Returns ``(resume, page_ok)``. The resume is reduced deterministically - the
+    least relevant content is dropped - and recompiled within a bounded number
+    of attempts. Nothing is ever invented: reduction only removes content, and
+    every surviving line still comes verbatim from the profile (the generator
+    validates each variant).
+    """
+    limit = int(getattr(config.profile, "resume_page_limit", 0) or 0)
+    attempts = int(getattr(config.profile, "resume_fit_attempts", 0) or 0)
+
+    resume = _render_compile_measure(
+        config, posting, match, generator, out_dir,
+        drop_bullets=0, drop_projects=0,
+    )
+    resume.page_limit = limit
+    if limit <= 0 or (_within_page_limit(resume, config) and _readable(resume, config)):
+        return resume, True
+
+    used = 0
+    last_good = (0, 0)
+    for attempt in range(1, attempts + 1):
+        drop_bullets, drop_projects = _fit_variant(attempt)
+        try:
+            candidate = _render_compile_measure(
+                config, posting, match, generator, out_dir,
+                drop_bullets=drop_bullets,
+                drop_projects=drop_projects,
+            )
+        except CompileError:
+            # The failed variant overwrote the shared ``resume.tex``; rewrite the
+            # kept variant so the persisted source matches the returned resume.
+            _rewrite_tex(generator, posting, match, out_dir, last_good)
+            break
+        used = attempt
+        last_good = (drop_bullets, drop_projects)
+        candidate.page_limit = limit
+        candidate.page_fit_attempts = used
+        resume = candidate
+        if _within_page_limit(resume, config) and _readable(resume, config):
+            return resume, True
+
+    resume.page_fit_attempts = used
+    return resume, _within_page_limit(resume, config) and _readable(resume, config)
+
+
+def _rewrite_tex(
+    generator: ResumeGenerator,
+    posting: JobPosting,
+    match,
+    out_dir: str,
+    variant: tuple[int, int],
+) -> None:
+    """Re-render one variant's ``.tex`` so it matches the resume object kept."""
+    drop_bullets, drop_projects = variant
+    generator.generate(
+        posting,
+        match,
+        out_dir,
+        drop_bullets=drop_bullets,
+        drop_projects=drop_projects,
+    )
+
+
 def _run_parseability(config: Config, resume, match, profile) -> None:
     # Test keyword survival against the profile-present surface forms, not the
     # canonical labels: the no-invention generator can only emit words that are
@@ -339,12 +502,14 @@ def _run_parseability(config: Config, resume, match, profile) -> None:
     # alias or a perfectly parseable resume is reported unparseable.
     profile_text = " ".join([profile.raw_text, *profile.skill_terms()])
     required_keywords = present_surface_forms(list(match.coverage.matched), profile_text)
-    try:
-        text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
-    except TextExtractionError as exc:
-        resume.parseability_ok = False
-        resume.parseability_detail = str(exc)
-        return
+    text = getattr(resume, "extracted_text", "")
+    if not text:
+        try:
+            text = extract_pdf_text(resume.pdf_path, config.profile.pdftotext)
+        except TextExtractionError as exc:
+            resume.parseability_ok = False
+            resume.parseability_detail = str(exc)
+            return
     ok, detail = check_parseability(
         text,
         required_sections=list(config.match.required_sections),

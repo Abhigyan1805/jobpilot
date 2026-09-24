@@ -143,6 +143,53 @@ Each queued item has a packet directory with `resume.pdf`, `cover_letter.pdf`,
 JD keywords the profile matches and the gaps it does not, so approval is one
 click.
 
+### Present: a browsable review surface
+
+```bash
+python -m jobpilot --config config.toml present
+# -> out/present/index.html  (open it in a browser; no server needed)
+```
+
+`present` turns the queued matches into one self-contained HTML page so you can
+actually look at the roles and choose, rather than read a list. One card per
+match, ordered by score, with company, title, location, window evidence, the
+match score, the matched skills versus the gaps, the direct apply link, and the
+tailored resume and cover letter embedded beside the card (the PDFs are copied
+into `out/present/assets/` and linked relatively). Every card states the safety
+state: nothing was submitted, and whether the role is auto-apply eligible or
+review-only, with the reason. A role is auto-apply eligible only when it is in
+the strong band *and* the pipeline queued it for a transient reason (daily cap,
+missing channel or auto-apply config); a strong-band role the pipeline routed to
+review for a blocking reason (for example an unconfirmed window), and every
+link-out, LinkedIn or non-strong-band role, is labelled review-only. Each card
+also shows the measured page count of its tailored resume (`Resume: 1-page ✓`,
+or a warning badge when it is over the limit and needs attention).
+
+Selection is deliberately narrow: only genuine technical, software-engineering,
+data and AI/ML roles are shown. Unrelated internships (design, UX,
+communications, video/content, marketing, HR, recruiting, non-technical product
+management, …) are left out entirely - not shown in a separate tier. Fit comes
+from the data the pipeline already computes: a posting's role relevance across
+the configured technical domains, confirmed by the matched skills against the
+master profile. `[present]` controls the target role set:
+
+```toml
+[present]
+out_dir = "present"                 # relative to [output].dir
+min_role_relevance = 0.5            # technical floor (per configured domain)
+borderline_role_relevance = 0.4     # shown only if nothing clears the floor
+technical_domains = ["ai_ml", "software", "research"]
+guarded_domains = ["research"]      # counts only with a matched core skill
+# exclude_terms = [...]             # non-technical role keywords, excluded outright
+```
+
+The broad `research` domain is *guarded*: it only counts as technical when the
+posting also matches a core technical skill, so design/policy/market research is
+not presented as an AI/ML role. If nothing clears the floor, the page says so and
+shows the closest technical matches with a note explaining why each is
+borderline, instead of padding the list. `present` never re-scores, never invents
+resume content and never submits.
+
 ---
 
 ## Safety model
@@ -247,6 +294,21 @@ Additional checks from the recruiter-prompt workflow:
   suggestions. They are suggestions, never facts, and never alter content. They are
   stored with the application record. (An optional LLM-advisor hook is a documented
   follow-up, not part of v1.)
+- **One-page enforcement.** A student resume should be one page, so the pipeline
+  measures the compiled PDF's page count deterministically (form feeds in the
+  existing `pdftotext` output, no new dependency) and compares it with
+  `profile.resume_page_limit` (default `1`). When over, it drops content and
+  recompiles within `profile.resume_fit_attempts` bounded attempts, in a fixed
+  order: the least relevant bullets first, then whole projects - relevance being
+  the posting fit the tool already computes. Spacing is never tightened: the
+  style template's vertical layout is already calibrated, so compressing it
+  overlaps headings and makes the page unreadable. Reduction only removes; every
+  surviving line still comes verbatim from the profile, and a variant that no
+  longer extracts a required section is rejected as unreadable rather than
+  shipped. If it still cannot fit, the posting is queued
+  for review with the measured count and the reason, and the `present` card shows
+  the page count with a warning badge instead of silently presenting two pages.
+  Nothing is ever invented, inflated or rewritten to make it fit.
 
 ### A note on "ATS rejects most resumes"
 
@@ -354,9 +416,13 @@ python -m unittest discover -s tests -t .
 
 Coverage includes filtering, matching (matched vs. gap terms), dedupe, the daily cap,
 guardrails (missing required field, LinkedIn review-only, dry-run), the
-"never invent content" rule, and an integration test that compiles a tailored resume
-with the real LaTeX engine and asserts the PDF is parseable (skipped when the
-toolchain is unavailable).
+"never invent content" rule, the `present` selection rules (a non-technical
+India-eligible internship is excluded and a technical one is included), the
+one-page fit (an over-long resume is reduced to one page, cutting preserves
+every fact, and the bounded-attempts fallback flags review with the measured
+count), and an integration test that compiles a tailored resume with the real
+LaTeX engine and asserts the PDF is parseable (skipped when the toolchain is
+unavailable).
 
 ## Limitations
 

@@ -26,6 +26,7 @@ def test_config(
     apply: dict | None = None,
     match: dict | None = None,
     filt: dict | None = None,
+    present: dict | None = None,
 ) -> Config:
     cfg = default_config()
     cfg.profile.path = str(MINI_PROFILE)
@@ -35,7 +36,7 @@ def test_config(
     cfg.output.dir = str((tmp_path / "out") if tmp_path else Path("out_test"))
     cfg.output.database = str((tmp_path / "jobpilot.db") if tmp_path else ":memory:")
     cfg.base_dir = str(FIXTURES)
-    for section, values in (("apply", apply), ("match", match), ("filter", filt)):
+    for section, values in (("apply", apply), ("match", match), ("filter", filt), ("present", present)):
         if not values:
             continue
         target = getattr(cfg, section)
