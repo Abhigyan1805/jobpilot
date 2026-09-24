@@ -375,12 +375,27 @@ class ApplyConfig:
 @dataclass
 class LinkedInConfig:
     enabled: bool = False
-    keywords: str = "intern"
+    #: Target query list, not one generic word. A single ``intern`` keyword over
+    #: one page returned only generic listings; a hand search for the actual
+    #: target roles returns many more relevant postings. Each query is paged,
+    #: then merged and de-duplicated by LinkedIn's job id. A scalar string is
+    #: still accepted for a one-query config (see ``discovery.string_list``).
+    keywords: list[str] = field(
+        default_factory=lambda: [
+            "machine learning intern",
+            "AI intern",
+            "data science intern",
+            "research intern",
+            "software engineer intern",
+        ]
+    )
     location: str = "India"
-    max_pages: int = 1
+    #: Pages per query (not per run). Kept small on purpose: the request rate is
+    #: deliberately low so a read-only reader does not get blocked.
+    max_pages: int = 2
     requests_per_second: float = 0.2
     timeout: float = 20.0
-    max_results: int = 25
+    max_results: int = 100
 
 
 @dataclass

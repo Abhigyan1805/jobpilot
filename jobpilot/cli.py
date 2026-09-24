@@ -193,6 +193,14 @@ def _print_source_outcomes(result) -> None:
             print(f"  skipped {outcome.source}: {outcome.error}")
         else:
             print(f"  failed  {outcome.source}: {outcome.error}")
+        for query, count in outcome.query_counts.items():
+            if query in outcome.query_errors:
+                print(f"            {query}: FAILED ({outcome.query_errors[query]})")
+            else:
+                print(f"            {query}: {count} new")
+        for query, error in outcome.query_errors.items():
+            if query not in outcome.query_counts:
+                print(f"            {query}: FAILED ({error})")
 
 
 def build_parser() -> argparse.ArgumentParser:

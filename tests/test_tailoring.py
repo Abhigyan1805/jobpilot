@@ -6,13 +6,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from jobpilot.cover_letter import CoverLetterGenerator
 from jobpilot.matching import Matcher
 from jobpilot.models import GeneratedResume, KeywordCoverage, MatchResult
 from jobpilot.lexicon import present_surface_forms
 from jobpilot.pipeline import _run_parseability
 from jobpilot.profile import load_profile, parse_profile_text
 from jobpilot.resume.compiler import compile_tex
-from jobpilot.resume.generator import ResumeGenerator
+from jobpilot.resume.generator import ResumeGenerator, latex_safe_text
 from jobpilot.resume.parseability import (
     TextExtractionError,
     check_parseability,
@@ -76,6 +77,44 @@ class ExtractPdfTextInvocationTests(unittest.TestCase):
         self.assertEqual(text, "caf\ufffd\n")
 
 
+class CompilerDecodeTests(unittest.TestCase):
+    """The LaTeX engine's output is not guaranteed to be UTF-8 (G3).
+
+    A non-ASCII document makes the Windows engine emit bytes that are invalid
+    UTF-8; a strict decode raised ``UnicodeDecodeError`` before the compile
+    result could be read.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tex = Path(self.tmp.name) / "cover_letter.tex"
+        self.tex.write_text("\\documentclass{article}\\begin{document}x\\end{document}", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @unittest.skipUnless(os.name == "posix", "fake engine requires a POSIX executable")
+    def test_non_utf8_engine_output_does_not_raise(self):
+        engine = Path(self.tmp.name) / "fake_engine"
+        engine.write_text(
+            f"#!{sys.executable}\n"
+            "import pathlib, sys\n"
+            "pathlib.Path('cover_letter.pdf').write_bytes(b'%PDF-1.4')\n"
+            "sys.stdout.buffer.write(b'log: \\xd0\\xbf invalid utf8\\n')\n"
+        )
+        engine.chmod(0o755)
+
+        pdf_path, _log = compile_tex(str(self.tex), str(engine))
+
+        self.assertTrue(Path(pdf_path).exists())
+
+    def test_latex_safe_text_drops_untypesettable_characters(self):
+        # A Cyrillic title must not reach pdflatex raw; the Latin part survives.
+        self.assertEqual(latex_safe_text("MGID Academy \u043f\u0447 AdTech"), "MGID Academy AdTech")
+        # Accented Latin is folded to its base letter, not dropped.
+        self.assertEqual(latex_safe_text("Z\u00fcrich"), "Zurich")
+
+
 @unittest.skipUnless(_HAS_TOOLCHAIN, "real LaTeX toolchain not available")
 class TailoringCompileTests(unittest.TestCase):
     def test_tailored_resume_compiles_and_is_parseable(self):
@@ -110,6 +149,29 @@ class TailoringCompileTests(unittest.TestCase):
                 min_keyword_survival=0.5,
             )
             self.assertTrue(ok, detail)
+
+    def test_non_ascii_cover_letter_compiles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = test_config(Path(tmp))
+            cfg.profile.path = REAL_PROFILE
+            cfg.profile.style_template = REAL_STYLE
+            cfg.profile.pdflatex = REAL_ENGINE
+            cfg.profile.pdftotext = REAL_PDFTOTEXT
+
+            profile = load_profile(REAL_PROFILE)
+            p = posting(
+                company="MGID Academy",
+                title="\u043f\u043e\u0447\u043d\u0438 \u043f\u0440\u043e\u0444\u0435\u0441\u0456\u0439\u043d\u0438\u0439 \u0448\u043b\u044f\u0445 \u0432 AdTech",
+            )
+            match = Matcher(profile, cfg).match(p)
+            letter = CoverLetterGenerator(profile, cfg).generate(p, match, tmp)
+            pdf_path, _log = compile_tex(letter.tex_path, REAL_ENGINE)
+            self.assertTrue(Path(pdf_path).exists())
+            # The untypesettable script is dropped so the compile succeeds; the
+            # Latin part of the title survives.
+            tex = Path(letter.tex_path).read_text(encoding="utf-8")
+            self.assertNotIn("\u043f", tex)
+            self.assertIn("AdTech", tex)
 
     def test_invented_number_fails_validator_against_real_profile(self):
         from jobpilot.facts import FactValidator

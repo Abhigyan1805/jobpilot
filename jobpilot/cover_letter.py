@@ -14,7 +14,7 @@ from jobpilot.config import Config
 from jobpilot.facts import FactValidator, content_tokens
 from jobpilot.models import GeneratedCoverLetter, JobPosting, MatchResult
 from jobpilot.profile import Profile
-from jobpilot.resume.generator import ResumeGenerator, latex_escape, slugify
+from jobpilot.resume.generator import ResumeGenerator, latex_escape, latex_safe_text, slugify
 from jobpilot.lexicon import extract_terms
 
 BOILERPLATE_WORDS = frozenset(
@@ -77,25 +77,38 @@ class CoverLetterGenerator:
             institution = inst.org or inst.title
         contact = self._contact_line()
 
-        body = TEMPLATE
-        for key, value in {
-            "@@NAME@@": latex_escape(self.profile.name),
+        values = {
+            "@@NAME@@": self.profile.name,
             "@@CONTACT@@": contact,
-            "@@COMPANY@@": latex_escape(posting.company or "your company"),
-            "@@TITLE@@": latex_escape(posting.title or "the role"),
-            "@@INSTITUTION@@": latex_escape(institution),
-            "@@BULLETS@@": latex_escape(" ".join(bullets)),
-        }.items():
-            body = body.replace(key, value)
+            "@@COMPANY@@": posting.company or "your company",
+            "@@TITLE@@": posting.title or "the role",
+            "@@INSTITUTION@@": institution,
+            "@@BULLETS@@": " ".join(bullets),
+        }
 
+        def render(escape, fallbacks: dict[str, str] | None = None) -> str:
+            body = TEMPLATE
+            for key, value in values.items():
+                rendered = escape(value)
+                if fallbacks and not rendered.strip():
+                    rendered = fallbacks.get(key, rendered)
+                body = body.replace(key, rendered)
+            return body
+
+        # Validate the faithful text first, then write a LaTeX-safe rendering.
+        # pdflatex cannot typeset every script a posting may use; a non-ASCII
+        # title/company would otherwise fail the compile (G3). Sanitising only
+        # after validation keeps the fact check on the real words.
+        body = render(latex_escape)
         violations = self._validate(body, posting)
         if violations:
             raise ValueError("cover letter violates the no-invention rule: " + "; ".join(violations[:5]))
 
+        safe_body = render(latex_safe_text, {"@@COMPANY@@": "your company", "@@TITLE@@": "the role"})
         job_dir = Path(out_dir) / f"{posting.source}-{slugify(posting.company)}-{slugify(posting.title)}-{posting.job_id}"
         job_dir.mkdir(parents=True, exist_ok=True)
         tex_path = job_dir / "cover_letter.tex"
-        tex_path.write_text(body, encoding="utf-8")
+        tex_path.write_text(safe_body, encoding="utf-8")
         text = "\n".join(bullets)
         return GeneratedCoverLetter(tex_path=str(tex_path), text=text)
 
@@ -115,7 +128,7 @@ class CoverLetterGenerator:
     def _contact_line(self) -> str:
         c = self.profile.contact
         bits = [c.get("email", ""), c.get("phone", ""), c.get("linkedin", ""), c.get("github", "")]
-        return latex_escape(" | ".join(b for b in bits if b))
+        return " | ".join(b for b in bits if b)
 
     def _validate(self, body: str, posting: JobPosting) -> list[str]:
         from jobpilot.facts import extract_numbers

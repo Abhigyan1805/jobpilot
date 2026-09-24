@@ -22,7 +22,12 @@ def compile_tex(
     """Compile tex_path next to itself; return (pdf_path, log_tail).
 
     The engine is invoked from the .tex directory with a relative filename so
-    that a Windows engine launched from WSL resolves paths correctly.
+    that a Windows engine launched from WSL resolves paths correctly. Its
+    stdout/stderr is decoded as UTF-8 with ``errors="replace"`` because the
+    Windows engine's console output is not guaranteed to be UTF-8: a document
+    containing non-ASCII text (a posting title in another script was observed)
+    makes the engine emit bytes that are invalid UTF-8, and a strict decode
+    raised ``UnicodeDecodeError`` before the real compile result could be read.
     """
     tex = Path(tex_path)
     if not tex.exists():
@@ -38,6 +43,8 @@ def compile_tex(
                 capture_output=True,
                 timeout=timeout,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except FileNotFoundError as exc:
             raise CompileError(f"latex engine not found: {engine}") from exc
