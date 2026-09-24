@@ -164,6 +164,31 @@ class LinkedInFetchTests(unittest.TestCase):
         self.assertEqual(adapter.query_counts["keywords=machine learning intern"], 2)
         self.assertEqual(adapter.query_counts["keywords=AI intern"], 1)
 
+    def test_a_fully_duplicate_first_page_does_not_stop_paging_a_query(self):
+        # Regression: a query whose first page is entirely duplicates of an
+        # earlier query must still be paged. No-new-ids on a page is not
+        # evidence the query is exhausted, so its later unique ids must be
+        # fetched (the previous overlap early-stop dropped them).
+        cfg = test_config()
+        cfg.linkedin.keywords = ["machine learning intern", "AI intern"]
+        cfg.linkedin.max_pages = 2
+        adapter = self._adapter(cfg)
+
+        def fake(url, **kwargs):
+            query = self._query(url)
+            start = int(unquote(url).split("start=")[1].split("&")[0])
+            if query == "machine learning intern":
+                return _card("1") + _card("2") if start == 0 else _card("3") + _card("4")
+            return _card("1") + _card("2") if start == 0 else _card("5") + _card("6")
+
+        with mock.patch("jobpilot.discovery.linkedin.fetch_text", side_effect=fake), mock.patch(
+            "jobpilot.discovery.linkedin.time.sleep"
+        ):
+            postings = adapter.fetch()
+
+        self.assertEqual([p.job_id for p in postings], ["1", "2", "3", "4", "5", "6"])
+        self.assertEqual(adapter.query_counts["keywords=AI intern"], 2)
+
     def test_scalar_keyword_still_works_as_one_query(self):
         cfg = test_config()
         cfg.linkedin.keywords = "intern"  # legacy single-keyword config
@@ -198,6 +223,8 @@ class LinkedInFetchTests(unittest.TestCase):
         self.assertTrue(outcome.ok)
         self.assertEqual([p.job_id for p in outcome.postings], ["111"])
         self.assertEqual(outcome.query_counts["keywords=AI intern"], 0)
+        self.assertIn("query outage", outcome.query_errors["keywords=AI intern"])
+        self.assertNotIn("keywords=machine learning intern", outcome.query_errors)
 
     def test_all_queries_failing_raises(self):
         cfg = test_config()
@@ -261,6 +288,31 @@ class SourceReportingTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertIn("keywords=machine learning intern: 7 new", text)
         self.assertIn("keywords=AI intern: 3 new", text)
+
+    def test_failed_query_is_printed_distinctly_from_an_empty_one(self):
+        import contextlib
+        import io
+
+        from jobpilot.cli import _print_source_outcomes
+        from jobpilot.discovery.base import FetchOutcome
+        from jobpilot.models import JobPosting
+        from jobpilot.pipeline import PipelineResult
+
+        outcome = FetchOutcome(
+            source="linkedin",
+            postings=[
+                JobPosting(source="linkedin", job_id="1", company="Acme", title="ML Intern", url="u")
+            ],
+            query_counts={"keywords=machine learning intern": 7, "keywords=AI intern": 0},
+            query_errors={"keywords=AI intern": "FetchError: query outage"},
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_source_outcomes(PipelineResult(source_outcomes=[outcome]))
+        text = buf.getvalue()
+        self.assertIn("keywords=machine learning intern: 7 new", text)
+        self.assertIn("keywords=AI intern: FAILED (FetchError: query outage)", text)
+        self.assertNotIn("keywords=AI intern: 0 new", text)
 
 
 if __name__ == "__main__":

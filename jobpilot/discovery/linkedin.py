@@ -10,9 +10,10 @@ A single generic ``intern`` keyword over one page fetched only about ten
 unrelated listings, so the reader now runs a *configurable list of target
 queries* (``[linkedin].keywords``), pages each a few times, and merges and
 de-duplicates the results by LinkedIn's own job id. A failure in one query is
-reported but never fails the adapter; only a total failure raises. The request
-rate stays deliberately low (``requests_per_second``) and each query's
-contribution is recorded in ``query_counts`` so the coverage gain is visible.
+recorded in ``query_errors`` but never fails the adapter; only a total failure
+raises. The request rate stays deliberately low (``requests_per_second``) and
+each query's contribution is recorded in ``query_counts`` so the coverage gain
+is visible.
 
 Honest limitation: reading LinkedIn this way is against LinkedIn's Terms of
 Service and is best-effort. It may stop working at any time. It is disabled by
@@ -143,9 +144,12 @@ class LinkedInAdapter(SourceAdapter):
         postings: list[JobPosting] = []
         seen: set[str] = set()
         errors: list[str] = []
+        succeeded = False
         sign_in_wall = False
         for query in queries:
             contributed = 0
+            label = f"keywords={query}"
+            query_failed = False
             for page in range(max_pages):
                 url = f"{SEARCH_URL}?keywords={self._q(query)}&location={location}&start={page * 10}"
                 try:
@@ -157,20 +161,28 @@ class LinkedInAdapter(SourceAdapter):
                         headers={"Accept": "text/html"},
                     )
                 except Exception as exc:  # noqa: BLE001 - one query must not fail the adapter
-                    errors.append(f"{query}: {type(exc).__name__}: {exc}")
+                    message = f"{type(exc).__name__}: {exc}"
+                    self.query_errors[label] = message
+                    errors.append(f"{query}: {message}")
+                    query_failed = True
                     break
                 time.sleep(interval)
 
                 cards = parse_search_html(markup)
                 if not cards:
                     if page == 0 and ("authwall" in markup or "sign in" in markup.lower()):
-                        errors.append("linkedin returned a sign-in wall; source unavailable")
+                        message = "linkedin returned a sign-in wall; source unavailable"
+                        self.query_errors[label] = message
+                        errors.append(message)
                         sign_in_wall = True
+                        query_failed = True
                     elif page == 0:
-                        errors.append(f"{query}: no cards parsed (shape change or empty result)")
+                        message = "no cards parsed (shape change or empty result)"
+                        self.query_errors[label] = message
+                        errors.append(f"{query}: {message}")
+                        query_failed = True
                     break
 
-                new_this_page = 0
                 for card in cards:
                     jid = card.get("job_id")
                     if not jid or jid in seen:
@@ -193,20 +205,17 @@ class LinkedInAdapter(SourceAdapter):
                         )
                     )
                     contributed += 1
-                    new_this_page += 1
                     if len(postings) >= max_results:
                         break
-                if new_this_page == 0:
-                    # A page whose rows were all already seen means we have
-                    # reached the overlap; paging further only wastes requests.
-                    break
                 if len(postings) >= max_results:
                     break
-            self.query_counts[f"keywords={query}"] = contributed
+            self.query_counts[label] = contributed
+            if not query_failed:
+                succeeded = True
             if sign_in_wall or len(postings) >= max_results:
                 break
 
-        if not postings and errors:
+        if not succeeded and errors:
             raise FetchError("; ".join(errors))
         return postings
 

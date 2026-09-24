@@ -18,10 +18,11 @@ server-side ``searchTerm`` keyword filter, so this adapter runs the generic feed
 *and* one ``searchTerm`` query per configured keyword, then merges and
 de-duplicates by Unstop's own id. This is the typed-slice-plus-broader-query
 pattern the other search adapters use: the keyword slice is a high-precision
-path, never the only one. A failure in one query is reported but never fails the
-adapter, and each query's contribution is recorded in ``query_counts``. The
-generic feed also repeats rows across pages, so rows are de-duplicated here
-before returning rather than wasting the fetch budget on repeats.
+path, never the only one. A failure in one query is recorded in ``query_errors``
+but never fails the adapter, and each query's contribution is recorded in
+``query_counts``. The generic feed also repeats rows across pages; every page is
+still fetched, and de-duplicating here only removes the repeated postings from
+the returned set.
 """
 
 from __future__ import annotations
@@ -66,14 +67,17 @@ class UnstopAdapter(SourceAdapter):
         generic, generic_error = self._run_query(opportunity, max_pages, search_term=None)
         self.query_counts["generic feed"] = self._merge(generic, postings, seen)
         if generic_error:
+            self.query_errors["generic feed"] = generic_error
             errors.append(f"generic: {generic_error}")
         else:
             ok = True
 
         for term in keywords:
             rows, error = self._run_query(opportunity, keyword_pages, search_term=term)
-            self.query_counts[f"searchTerm={term}"] = self._merge(rows, postings, seen)
+            label = f"searchTerm={term}"
+            self.query_counts[label] = self._merge(rows, postings, seen)
             if error:
+                self.query_errors[label] = error
                 errors.append(f"{term}: {error}")
             else:
                 ok = True

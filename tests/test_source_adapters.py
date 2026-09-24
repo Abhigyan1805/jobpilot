@@ -360,6 +360,8 @@ class UnstopTests(unittest.TestCase):
         self.assertTrue(outcome.ok)
         self.assertEqual([p.job_id for p in outcome.postings], ["100"])
         self.assertEqual(outcome.query_counts["searchTerm=ai"], 0)
+        self.assertIn("searchTerm endpoint outage", outcome.query_errors["searchTerm=ai"])
+        self.assertNotIn("generic feed", outcome.query_errors)
 
     def test_all_queries_failing_raises(self):
         cfg = test_config()
