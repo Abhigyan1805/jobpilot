@@ -160,6 +160,44 @@ class ExtractDeadlineTests(unittest.TestCase):
             "",
         )
 
+    def test_joined_internship_window_is_not_the_deadline(self):
+        # A cue that states no date must never reach a later clause's window.
+        self.assertEqual(
+            self._extract(
+                "Applications are accepted until positions are filled, "
+                "and the internship runs June 1, 2026 to August 1, 2026."
+            ),
+            "",
+        )
+        self.assertEqual(
+            self._extract(
+                "Applications are open until positions are filled, "
+                "with the internship running June 1, 2026 to August 1, 2026."
+            ),
+            "",
+        )
+        self.assertEqual(
+            self._extract(
+                "Applications are accepted until positions are filled, internship starts 2026-06-01."
+            ),
+            "",
+        )
+
+    def test_cue_adjacent_range_is_not_extended_to_a_following_window(self):
+        # The cue's own date is the deadline; a connector to a later date in the
+        # posting is never followed on to a window end.
+        self.assertNotEqual(
+            self._extract("Applications are accepted until March 15, 2026 to August 1, 2026."),
+            "2026-08-01",
+        )
+
+    def test_separator_between_cue_and_date_is_optional(self):
+        self.assertEqual(self._extract("Apply: March 15, 2026"), "2026-03-15")
+        self.assertEqual(self._extract("Apply - March 15, 2026"), "2026-03-15")
+        self.assertEqual(self._extract("Applications close: March 15, 2026"), "2026-03-15")
+        self.assertEqual(self._extract("Applications close March 15, 2026"), "2026-03-15")
+        self.assertEqual(self._extract("Applications close:March 15, 2026"), "2026-03-15")
+
     def test_opening_date_alone_never_marks_a_posting_expired(self):
         p = posting(description="Applications open 2026-01-01.")
         deadline = extract_deadline(p)

@@ -44,25 +44,29 @@ MONTHS = {
 _MONTH_ALT = "|".join(sorted(MONTHS, key=len, reverse=True))
 
 # Phrases that introduce the *application* deadline, never the internship window.
-# These are explicit: an explicit close/deadline cue always outranks the weak
-# opening cue below.
-_APPLICATION_CUE_RE = re.compile(
+# An explicit close/deadline cue always outranks the weak opening cue below and
+# always supplies its own date: the date must directly follow the cue (separated
+# only by ``:``/``-``/whitespace), so a later date in another clause (an
+# internship start/end window) is never picked up. ``appl(?:y|ies)\b`` covers the
+# headless forms ("Apply: March 15, 2026", "Apply - March 15, 2026").
+_CLOSE_CUE_RE = re.compile(
     r"(?:"
     r"appl(?:y|ies|ication|ications)\s+(?:by|before|no\s+later\s+than)"
+    r"|appl(?:y|ies)\b"
     r"|deadline(?:\s+(?:for|to)\s+apply(?:ing)?)?"
     r"|last\s+date\s+(?:to\s+apply|of\s+application|for\s+application)"
-    r"|applications?\s+(?:close|closes|closing|are\s+closed)"
+    r"|applications?\s+(?:close|closes|closing|are\s+closed)(?:\s+on)?"
     r"|applications?\s+(?:are\s+)?(?:accepted|open|available)\s+"
     r"(?:until|till|through|up\s+to)"
     r")",
     re.IGNORECASE,
 )
-# A weak cue marks an *opening* date ("applications open January 1"). An opening
-# date is never a deadline, so this cue counts only when a close/range connector
-# supplies an end date ("open January 1 through February 1" / "open January 1
-# and close February 1"); a lone opening date yields nothing.
+# A weak opening cue marks an *opening* date ("applications open January 1"). An
+# opening date is never a deadline on its own, so this cue counts only when a
+# close/range connector directly joins that date to a second date ("open January
+# 1 through February 1" / "open January 1 and close February 1").
 _OPEN_CUE_RE = re.compile(
-    rf"applications?\s+(?:are\s+)?(?:accepted|open|available)(?=\s+(?:\d|(?:{_MONTH_ALT})))",
+    r"applications?\s+(?:are\s+)?(?:accepted|open|available)",
     re.IGNORECASE,
 )
 _ISO_RE = re.compile(r"\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b")
@@ -74,20 +78,14 @@ _DAY_FIRST_RE = re.compile(
     rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_ALT})\.?,?\s+((?:19|20)\d{{2}})\b",
     re.IGNORECASE,
 )
+# The only characters allowed between a cue and its own date.
+_SEPARATOR_RE = re.compile(r"[\s:\-–—]*")
 # A connector that directly joins two dates states a range ("A to B"); only then
 # is the later date the deadline. Any intervening words break the range.
 _RANGE_CONNECTOR_RE = re.compile(r"\s*(?:-|–|—|through|until|till|to)\s*", re.IGNORECASE)
 # An opening date followed directly by a closing phrase ("A and close B") states
 # the closing date as the deadline.
 _CLOSE_CONNECTOR_RE = re.compile(r"\s*(?:,|and)?\s*clos(?:e|es|ing|ed)(?:\s+on)?\s*", re.IGNORECASE)
-# A cue's date lives in its own clause: a following sentence or semicolon-joined
-# clause (typically the internship's own start/end window) is never scanned, so a
-# weak cue cannot pick up the window's end date. A line break or a month
-# abbreviation's period ("Mar.", "Sept.") is not a sentence boundary, so a stated
-# deadline survives.
-_CLAUSE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])|;")
-# How far after a cue to look for its date.
-_LOOKAHEAD = 90
 
 
 def parse_iso_deadline(value) -> date | None:
@@ -141,40 +139,55 @@ def _date_candidates(window: str) -> list[tuple[int, int, date]]:
     return candidates
 
 
-def _pick(candidates: list[tuple[int, int, date]], window: str, *, require_connector: bool = False) -> date | None:
-    if not candidates:
+def _leading_date(rest: str) -> tuple[int, int, date] | None:
+    """The first date that is textually bound to the cue ending at ``rest``'s start.
+
+    Only an optional separator (``:``, ``-``, whitespace) may sit between the cue
+    and its date, so a date elsewhere in the text - the internship's own window -
+    is never mistaken for the cue's date.
+    """
+    start = _SEPARATOR_RE.match(rest).end()
+    candidates = _date_candidates(rest)
+    if not candidates or candidates[0][0] != start:
         return None
-    if len(candidates) == 1:
-        return None if require_connector else candidates[0][2]
-    first, last = candidates[0], candidates[-1]
-    between = window[first[1]: last[0]]
-    # Only a connector that directly joins the two dates is a range ("A to B") or
-    # an explicit closing ("A and close B"); a sentence or extra words in between
-    # (an internship window) is not.
-    if _RANGE_CONNECTOR_RE.fullmatch(between) or _CLOSE_CONNECTOR_RE.fullmatch(between):
-        return last[2]
-    return None if require_connector else first[2]
+    return candidates[0]
+
+
+def _range_end(rest: str, first: tuple[int, int, date]) -> date | None:
+    """The second date of a range whose first date is ``first``, if one joins it."""
+    tail = rest[first[1]:]
+    match = _RANGE_CONNECTOR_RE.match(tail) or _CLOSE_CONNECTOR_RE.match(tail)
+    if not match:
+        return None
+    following = _leading_date(tail[match.end():])
+    return following[2] if following is not None else None
 
 
 def extract_deadline(posting: JobPosting) -> str:
     """Return the posting's stated application deadline as ``YYYY-MM-DD`` or ``""``.
 
-    The cue phrase must be present, so a bare date in the body (an internship
-    start/end window, a posted date) is never mistaken for a deadline. An
-    explicit application cue is tried first; a weak opening cue only counts when
-    a range or close connector supplies an end date. A cue with no unambiguous
-    date after it yields no deadline rather than a guess.
+    A date only counts when it is textually bound to an application cue: the cue
+    phrase is present and its date directly follows it. A cue whose own clause
+    states no date ("Applications are accepted until positions are filled") yields
+    no deadline and never scans on for a later date, so an internship's own
+    start/end window can never become the deadline. A weak opening cue ("applications
+    open") only counts when a connector supplies a second, closing date.
     """
     text = " ".join(part for part in [posting.description, posting.title] if part)
     if not text:
         return ""
-    for cue_re, require_connector in ((_APPLICATION_CUE_RE, False), (_OPEN_CUE_RE, True)):
-        for cue in cue_re.finditer(text):
-            window = text[cue.end(): cue.end() + _LOOKAHEAD]
-            window = _CLAUSE_BOUNDARY_RE.split(window, maxsplit=1)[0]
-            chosen = _pick(_date_candidates(window), window, require_connector=require_connector)
-            if chosen is not None:
-                return chosen.isoformat()
+    for cue in _CLOSE_CUE_RE.finditer(text):
+        bound = _leading_date(text[cue.end():])
+        if bound is not None:
+            return bound[2].isoformat()
+    for cue in _OPEN_CUE_RE.finditer(text):
+        rest = text[cue.end():]
+        bound = _leading_date(rest)
+        if bound is None:
+            continue
+        end = _range_end(rest, bound)
+        if end is not None:
+            return end.isoformat()
     return ""
 
 
