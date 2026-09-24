@@ -130,6 +130,42 @@ class ExtractDeadlineTests(unittest.TestCase):
             "",
         )
 
+    def test_single_opening_date_is_not_a_deadline(self):
+        self.assertEqual(self._extract("Applications open 2026-01-01."), "")
+        self.assertEqual(self._extract("Applications are accepted January 1, 2026."), "")
+
+    def test_accepted_until_still_returns_its_close_date(self):
+        self.assertEqual(
+            self._extract("Applications are accepted until March 15, 2026."),
+            "2026-03-15",
+        )
+
+    def test_non_application_open_until_is_not_a_deadline(self):
+        self.assertEqual(
+            self._extract("Our office is open until December 25, 2026 for the holidays."),
+            "",
+        )
+        self.assertEqual(self._extract("The campus remains open through June 30, 2026."), "")
+
+    def test_semicolon_joined_internship_window_is_not_the_deadline(self):
+        self.assertEqual(
+            self._extract(
+                "Applications are accepted until positions are filled; "
+                "the internship runs June 1, 2026 to August 1, 2026."
+            ),
+            "",
+        )
+        self.assertEqual(
+            self._extract("The role is open until filled; internship runs 2026-06-01 to 2026-08-01."),
+            "",
+        )
+
+    def test_opening_date_alone_never_marks_a_posting_expired(self):
+        p = posting(description="Applications open 2026-01-01.")
+        deadline = extract_deadline(p)
+        self.assertEqual(deadline, "")
+        self.assertEqual(format_deadline(deadline, today=date(2026, 9, 24)), "")
+
     def test_extraction_does_not_make_the_window_verified(self):
         p = posting(
             description="Machine learning internship. Applications accepted 2025-01-05 through 2025-05-30."
