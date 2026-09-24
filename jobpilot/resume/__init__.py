@@ -10,7 +10,9 @@ from jobpilot.resume.generator import (
 from jobpilot.resume.parseability import (
     TextExtractionError,
     check_parseability,
+    count_pages,
     extract_pdf_text,
+    normalize_text,
 )
 
 __all__ = [
@@ -24,5 +26,7 @@ __all__ = [
     "slugify",
     "TextExtractionError",
     "check_parseability",
+    "count_pages",
     "extract_pdf_text",
+    "normalize_text",
 ]

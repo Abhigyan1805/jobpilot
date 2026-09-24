@@ -6,6 +6,7 @@ captured as an :class:`FetchOutcome` error and never aborts the run.
 
 from __future__ import annotations
 
+from jobpilot import http
 from jobpilot.config import Config, SourceConfig
 from jobpilot.discovery.ashby import AshbyAdapter
 from jobpilot.discovery.base import FetchOutcome, SourceAdapter
@@ -20,6 +21,7 @@ from jobpilot.discovery.workable import WorkableAdapter
 from jobpilot.discovery.workable_global import WorkableGlobalAdapter
 from jobpilot.http import RateLimiter
 from jobpilot.models import JobPosting
+from jobpilot.robots import RobotsGate
 
 ADAPTERS: dict[str, type[SourceAdapter]] = {
     "greenhouse": GreenhouseAdapter,
@@ -57,12 +59,26 @@ def build_adapters(config: Config) -> list[SourceAdapter]:
 
 
 def discover(config: Config) -> tuple[list[JobPosting], list[FetchOutcome]]:
-    """Run all adapters, returning de-duplicated postings and per-source outcomes."""
+    """Run all adapters, returning de-duplicated postings and per-source outcomes.
+
+    One :class:`RobotsGate` is created per run and installed around the adapter
+    loop. Every adapter request goes through :func:`jobpilot.http.fetch`, which
+    evaluates the gate against the concrete request URL (path and query, not the
+    host root) before making the request, so a path-specific Disallow is
+    enforced and no adapter can bypass it. The gate fails closed: a host whose
+    policy cannot be read is not fetched.
+    """
+    gate = (
+        RobotsGate(agent=config.robots.agent, timeout=float(config.robots.timeout))
+        if config.robots.enabled
+        else None
+    )
     outcomes: list[FetchOutcome] = []
     merged: dict[str, JobPosting] = {}
-    for adapter in build_adapters(config):
-        outcome = adapter.fetch_safe()
-        outcomes.append(outcome)
-        for posting in outcome.postings:
-            merged.setdefault(posting.stable_id, posting)
+    with http.use_robots_gate(gate):
+        for adapter in build_adapters(config):
+            outcome = adapter.fetch_safe()
+            outcomes.append(outcome)
+            for posting in outcome.postings:
+                merged.setdefault(posting.stable_id, posting)
     return list(merged.values()), outcomes

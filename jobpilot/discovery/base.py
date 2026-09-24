@@ -81,7 +81,12 @@ class SourceAdapter(ABC):
     #: Board tokens or search parameters come from config; no default tokens.
     requires_tokens: bool = True
 
-    def __init__(self, source_config: SourceConfig, config: Config, limiter: RateLimiter | None = None):
+    def __init__(
+        self,
+        source_config: SourceConfig,
+        config: Config,
+        limiter: RateLimiter | None = None,
+    ):
         self.source_config = source_config
         self.config = config
         self.limiter = limiter or RateLimiter(0.0)

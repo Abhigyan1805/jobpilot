@@ -19,6 +19,9 @@ class JobPosting:
     description: str = ""
     employment_type: str = ""
     published_at: str = ""
+    #: Application deadline as an ISO ``YYYY-MM-DD`` date when the posting states
+    #: one; empty otherwise. Never guessed and never used as a hard filter.
+    deadline: str = ""
     apply_url: str = ""
     apply_email: str = ""
     is_remote: bool | None = None

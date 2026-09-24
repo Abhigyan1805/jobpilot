@@ -18,12 +18,24 @@ import json
 import sys
 from pathlib import Path
 
+from jobpilot.archive import archive_application
 from jobpilot.config import load_config
+from jobpilot.deadline import format_deadline, is_stale, staleness_days
+from jobpilot.lifecycle import (
+    VALID_OUTCOMES,
+    candidate_for,
+    followup_candidates,
+    followup_template,
+    is_final,
+    normalize_outcome,
+    stale_candidates,
+)
 from jobpilot.linkout import build_manual_posting, configured_sources
 from jobpilot.pipeline import run_manual_pipeline, run_pipeline
 from jobpilot.present import run_present
 from jobpilot.review import export_queue
 from jobpilot.store import Store
+from jobpilot.upskill import collect_gaps, render_heatmap
 
 
 def _load(args):
@@ -63,6 +75,9 @@ def cmd_queue(args) -> int:
                     f"[{row['id']}] {row['score']:.2f} {row['source']:10s} "
                     f"{row['company']} - {row['title']}"
                 )
+                deadline = _deadline_label(store, config, row["stable_id"])
+                if deadline:
+                    print(f"      deadline: {deadline}")
                 print(f"      apply: {row['apply_url']}")
                 print(f"      resume: {row['resume_pdf']}")
                 if row["matched_keywords"]:
@@ -81,6 +96,7 @@ def cmd_queue(args) -> int:
             store.decide_review(args.id, status)
             print(f"{status}: {row['company']} - {row['title']}")
             if args.queue_command == "approve":
+                _archive_stable_id(store, config, row["stable_id"])
                 print(f"apply here: {row['apply_url']}")
                 print(f"resume: {row['resume_pdf']}")
                 print(f"cover:  {row['cover_pdf']}")
@@ -171,15 +187,205 @@ def cmd_postings(args) -> int:
     try:
         rows = store.list_postings(eligible=args.eligible, min_score=args.min_score)
         for row in rows[: args.limit]:
+            extras = _posting_flags(config, row)
             print(
                 f"{row['score'] if row['score'] is not None else '-':>5} "
                 f"{'elig' if row['eligible'] else 'rej '} "
-                f"{row['source']:10s} {row['company']} - {row['title']} [{row['window_label'] or '?'}]"
+                f"{row['source']:10s} {row['company']} - {row['title']} "
+                f"[{row['window_label'] or '?'}]{extras}"
             )
         print(f"({len(rows)} total)")
     finally:
         store.close()
     return 0
+
+
+def _posting_flags(config, row) -> str:
+    """Deadline urgency/expiry and a staleness flag for one posting row."""
+    flags: list[str] = []
+    label = format_deadline(
+        row["deadline"] if "deadline" in row.keys() else "",
+        closing_soon_days=int(config.deadline.closing_soon_days),
+    )
+    if label:
+        flags.append(label)
+    age = staleness_days(row["published_at"]) if "published_at" in row.keys() else None
+    if age is not None and is_stale(row["published_at"], stale_days=int(config.deadline.stale_days)):
+        flags.append(f"stale {age}d")
+    return ("  " + " ".join(flags)) if flags else ""
+
+
+def _deadline_label(store: Store, config, stable_id: str) -> str:
+    row = store.get_posting(stable_id)
+    if row is None or "deadline" not in row.keys():
+        return ""
+    return format_deadline(row["deadline"], closing_soon_days=int(config.deadline.closing_soon_days))
+
+
+def cmd_upskill(args) -> int:
+    config = _load(args)
+    store = Store(config.resolve(config.output.database))
+    try:
+        gaps = collect_gaps(store)
+    finally:
+        store.close()
+    print(render_heatmap(gaps, limit=args.limit))
+    return 0
+
+
+def _resolve_stable_id(store: Store, ref: str) -> str:
+    """Resolve a review-queue id, application id or stable id to a stable id."""
+    ref = (ref or "").strip()
+    if not ref:
+        return ""
+    # A stable id is accepted verbatim when it is already on record.
+    if store.get_posting(ref) is not None or store.latest_application(ref) is not None:
+        return ref
+    if ":" in ref:
+        return ""
+    if ref.isdigit():
+        review = store.get_review(int(ref))
+        if review is not None:
+            return review["stable_id"]
+        app = store.get_application(int(ref))
+        if app is not None:
+            return app["stable_id"]
+    return ""
+
+
+def _archive_stable_id(store: Store, config, stable_id: str) -> str:
+    row = store.latest_application(stable_id)
+    if row is None:
+        return ""
+    try:
+        return archive_application(store, config, row)
+    except OSError as exc:
+        print(f"warning: could not archive application: {exc}", file=sys.stderr)
+        return ""
+
+
+def _print_application_row(row) -> None:
+    print(
+        f"[app {row['id']}] {row['company']} - {row['title']} "
+        f"status={row['status']} outcome={row['outcome'] or '-'} "
+        f"reminders={int(row['reminders'] or 0)}"
+    )
+
+
+def cmd_outcome(args) -> int:
+    config = _load(args)
+    store = Store(config.resolve(config.output.database))
+    try:
+        if not args.id:
+            rows = [r for r in store.latest_applications() if not is_final(r["outcome"])]
+            if not rows:
+                print("no open applications to update")
+                return 0
+            print("Open applications (pass the id to record an outcome):")
+            for row in rows:
+                _print_application_row(row)
+            return 0
+
+        stable_id = _resolve_stable_id(store, args.id)
+        if not stable_id:
+            print(f"no review, application or posting found for id {args.id!r}", file=sys.stderr)
+            return 1
+
+        status = normalize_outcome(args.status) if args.status else ""
+        if status and status not in VALID_OUTCOMES:
+            print(
+                f"unknown outcome {args.status!r}; expected one of: {', '.join(VALID_OUTCOMES)}",
+                file=sys.stderr,
+            )
+            return 2
+        if not status:
+            row = store.latest_application(stable_id)
+            if row is None:
+                print("no application recorded for that posting", file=sys.stderr)
+                return 1
+            _print_application_row(row)
+            return 0
+
+        row = store.set_outcome(stable_id, status, note=args.note)
+        if row is None:
+            print("no application recorded for that posting", file=sys.stderr)
+            return 1
+        _archive_stable_id(store, config, stable_id)
+        print(f"recorded outcome '{status}' for {row['company']} - {row['title']}")
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_followups(args) -> int:
+    config = _load(args)
+    store = Store(config.resolve(config.output.database))
+    try:
+        if args.record:
+            stable_id = _resolve_stable_id(store, args.record)
+            if not stable_id:
+                print(f"no application found for id {args.record!r}", file=sys.stderr)
+                return 1
+            row = store.record_followup(stable_id, note=args.note or "follow-up sent")
+            if row is None:
+                print(f"no application found for id {args.record!r}", file=sys.stderr)
+                return 1
+            _archive_stable_id(store, config, stable_id)
+            candidate = candidate_for(store, stable_id)
+            if candidate is not None:
+                print(followup_template(candidate))
+                print(f"\nlogged follow-up #{int(candidate.reminders)}")
+            return 0
+
+        days = args.days if args.days is not None else int(config.lifecycle.followup_days)
+        candidates = followup_candidates(
+            store, days=days, max_reminders=int(config.lifecycle.max_reminders)
+        )
+        if not candidates:
+            print(f"no follow-ups due ({days}-day quiet threshold)")
+            return 0
+        print(f"{len(candidates)} follow-up(s) due (quiet {days}+ days, max {config.lifecycle.max_reminders} reminders):")
+        print(f"{'app':>4}  {'quiet':>5}  {'sent':>4}  company - title")
+        for candidate in candidates:
+            print(
+                f"{candidate.app_id:>4}  {candidate.quiet_days:>5}  {candidate.reminders:>4}  "
+                f"{candidate.company} - {candidate.title}"
+            )
+        print("\n-- draft (plain template; nothing is sent) --")
+        print(followup_template(candidates[0]))
+        print("\nRecord one with: jobpilot followups --record <id>")
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_stale(args) -> int:
+    config = _load(args)
+    store = Store(config.resolve(config.output.database))
+    try:
+        days = args.days if args.days is not None else int(config.lifecycle.stale_days)
+        candidates = stale_candidates(store, days=days)
+        if not candidates:
+            print(f"no open applications quiet for {days}+ days")
+            return 0
+        print(f"{len(candidates)} stale application(s) (quiet {days}+ days):")
+        print(f"{'app':>4}  {'quiet':>5}  company - title")
+        for candidate in candidates:
+            print(f"{candidate.app_id:>4}  {candidate.quiet_days:>5}  {candidate.company} - {candidate.title}")
+        if not args.write:
+            print("\ndry run: pass --write to mark them no_response")
+            return 0
+        for candidate in candidates:
+            store.set_outcome(
+                candidate.stable_id,
+                "no_response",
+                note=f"stale resolved no_response after {candidate.quiet_days} days quiet",
+            )
+            _archive_stable_id(store, config, candidate.stable_id)
+        print(f"\nmarked {len(candidates)} application(s) no_response")
+        return 0
+    finally:
+        store.close()
 
 
 def _print_source_outcomes(result) -> None:
@@ -240,6 +446,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="output directory for index.html (default: [output].dir/[present].out_dir)",
     )
     p_present.set_defaults(func=cmd_present)
+
+    p_upskill = sub.add_parser(
+        "upskill", help="rank stored skill gaps into a deterministic learning list"
+    )
+    p_upskill.add_argument("--limit", type=int, default=20)
+    p_upskill.set_defaults(func=cmd_upskill)
+
+    p_outcome = sub.add_parser(
+        "outcome", help="record what happened to an application (lifecycle status)"
+    )
+    p_outcome.add_argument("id", nargs="?", default="", help="review id, application id or stable id")
+    p_outcome.add_argument("--status", default="", help=f"one of: {', '.join(VALID_OUTCOMES)}")
+    p_outcome.add_argument("--note", default="", help="a short dated note to append")
+    p_outcome.set_defaults(func=cmd_outcome)
+
+    p_follow = sub.add_parser(
+        "followups", help="list open applications gone quiet and draft a plain follow-up"
+    )
+    p_follow.add_argument("--days", type=int, default=None, help="quiet threshold (default from config)")
+    p_follow.add_argument("--record", default="", help="record a follow-up for this application id")
+    p_follow.add_argument("--note", default="", help="note to append when recording")
+    p_follow.set_defaults(func=cmd_followups)
+
+    p_stale = sub.add_parser(
+        "stale", help="sweep open applications quiet for a long time to no_response"
+    )
+    p_stale.add_argument("--days", type=int, default=None, help="quiet threshold (default from config)")
+    p_stale.add_argument("--write", action="store_true", help="mark the candidates no_response")
+    p_stale.set_defaults(func=cmd_stale)
 
     p_post = sub.add_parser("postings", help="list tracked postings")
     p_post.add_argument("--eligible", action="store_true", default=None)

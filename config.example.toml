@@ -222,3 +222,32 @@ answers_file = "answers.toml"
 # narrows which recipients may be used. Free-text addresses in a job
 # description are never used.
 # email_allowlist = ["careers@example.com"]
+
+# ---------------------------------------------------------------------------
+# robots.txt gate (enforced before any automated fetch)
+# ---------------------------------------------------------------------------
+# Each source host's robots.txt is read at most once per run and cached, and the
+# verdict is computed for the concrete request path and query (not the host
+# root). The gate fails closed: a host whose policy cannot be read, or a path
+# the policy disallows, is skipped rather than fetched. An empty robots.txt is
+# allow-all; a 404 means no published policy (permitted); longest-match wins with
+# ties to Disallow; a Disallow for the agent or "*" blocks.
+[robots]
+enabled = true
+agent = "jobpilot"
+timeout = 12.0
+
+# ---------------------------------------------------------------------------
+# Deadline urgency and posting staleness (display only; never a hard filter)
+# ---------------------------------------------------------------------------
+[deadline]
+closing_soon_days = 7   # a stored deadline this many days away is "closing soon"
+stale_days = 30         # a posting published longer ago than this is flagged stale
+
+# ---------------------------------------------------------------------------
+# Application lifecycle (deterministic; no model, nothing sent)
+# ---------------------------------------------------------------------------
+[lifecycle]
+followup_days = 10      # an open application quiet this long is due a follow-up
+max_reminders = 2       # never chase more than twice
+stale_days = 60         # an open application quiet this long sweeps to no_response

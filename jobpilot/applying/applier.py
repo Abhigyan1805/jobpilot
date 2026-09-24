@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from jobpilot.applying.base import SubmissionAdapter
+from jobpilot.archive import archive_application
 from jobpilot.config import Config
 from jobpilot.filtering import review_only_reasons
 from jobpilot.linkout import is_manual_source
@@ -157,9 +158,24 @@ class Applier:
         )
         if result.status == "submitted":
             self.store.update_application(app_id, status="submitted", outcome=result.detail)
+            self._archive(app_id)
         else:
             self.store.update_application(app_id, status="failed", error=result.detail)
         return ApplyOutcome("submit", result.status, result.detail, app_id)
+
+    def _archive(self, app_id: int) -> None:
+        """Archive the submitted materials, best-effort.
+
+        A local disk failure must never turn a successful submission into a
+        failed one, so archiving is reported nowhere and swallowed here; the
+        application row and its stored artifacts remain the record of truth.
+        """
+        try:
+            row = self.store.get_application(app_id)
+            if row is not None:
+                archive_application(self.store, self.config, row)
+        except Exception:  # noqa: BLE001 - archiving must never fail a submission
+            pass
 
     def _to_review(self, plan: ApplicationPlan, status: str, category: str) -> ApplyOutcome:
         app_id = self.store.create_application(

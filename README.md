@@ -22,8 +22,12 @@ employer, date, metric or project.
    global job search and The Muse, plus an optional read-only LinkedIn listing
    reader that never logs in, never authenticates and never applies. Every source
    is a pluggable adapter behind one interface, and one source failing never
-   aborts the run. Sources whose terms forbid automation are never scraped:
-   they are surfaced as **link-out** channels instead (see below).
+   aborts the run. Before any adapter fetches, a **robots.txt gate** checks each
+   source host once per run (cached) and evaluates the concrete request path and
+   query; it fails closed: a host whose policy cannot be read, or a path the
+   policy disallows, is not fetched. Sources whose terms
+   forbid automation are never scraped: they are surfaced as **link-out** channels
+   instead (see below).
 2. **Filtering and matching** - hard filters first (must be an internship, must
    plausibly run in Jan-Jun, must be open to India or remote from India), then a
    deterministic, documented scoring rubric against the master profile.
@@ -38,7 +42,11 @@ employer, date, metric or project.
    link-out packets and routed to the review queue for one-click human submission.
 5. **Tracker and review queue** - a durable SQLite store of every posting seen and a
    queue of uncertain / no-public-path applications with a direct link and the
-   generated PDFs, plus a CLI to list, approve and export.
+   generated PDFs, plus a CLI to list, approve and export. Submitted or approved
+   applications are archived to disk (the exact materials plus the posting text),
+   and a deterministic lifecycle (`outcome`, `followups`, `stale`) keeps the
+   tracker alive after applying. A `upskill` command turns the stored gaps into a
+   ranked learning list.
 
 ### What submits automatically - and what does not
 
@@ -190,6 +198,53 @@ shows the closest technical matches with a note explaining why each is
 borderline, instead of padding the list. `present` never re-scores, never invents
 resume content and never submits.
 
+### Tracking: outcomes, follow-ups and the skill-gap heatmap
+
+Once you apply, the tracker keeps working. On an auto-submission or a
+`queue approve`, the exact submitted materials (resume/cover PDFs and their
+`.tex` sources) plus the posting text are archived to
+`out/applications/<company>-<title>-<hash>/`; an existing file is never
+overwritten, so the archive always holds the version that was actually sent.
+`outcome.md` records the current status.
+
+```bash
+# What happened?  (no id lists the open applications)
+python -m jobpilot --config config.toml outcome 3 --status interview --note "phone screen booked"
+# Open applications gone quiet for 10+ days, with a plain follow-up draft
+python -m jobpilot --config config.toml followups
+python -m jobpilot --config config.toml followups --record 3      # log a follow-up
+# Batch-resolve applications quiet for 60+ days
+python -m jobpilot --config config.toml stale            # preview
+python -m jobpilot --config config.toml stale --write    # mark no_response
+```
+
+The lifecycle vocabulary is `applied | interview | offer | hired | rejected |
+no_response | offer_declined | withdrawn`; everything except the final five stays
+open. Follow-ups are plain templates (role, company and date only - no new
+claims), capped at two per application, and nothing is ever sent by the pipeline.
+
+Stored gaps are turned into a learning list:
+
+```bash
+python -m jobpilot --config config.toml upskill
+```
+
+`upskill` aggregates `postings.missing_keywords` and `applications.gaps`,
+weighting each job by `(1 - score)` so the roles that exposed the most gaps count
+for more, and prints a ranked table. No model is involved, and a job with no
+recorded gaps contributes nothing rather than being guessed at.
+
+### Deadlines and posting staleness
+
+Where a posting states an application deadline ("apply by", "applications
+close", "deadline"), it is extracted into an ISO date and stored. `jobpilot
+postings` and `jobpilot queue list` label a deadline as *closing soon* (within
+`[deadline].closing_soon_days`, default 7) or *expired*, and flag a posting
+published more than `[deadline].stale_days` ago. A deadline is **never a hard
+filter** and a missing one never changes a posting's status; a bare date or an
+ambiguous numeric date is never guessed as a deadline, and the internship's own
+start/end window is untouched.
+
 ---
 
 ## Safety model
@@ -218,6 +273,17 @@ resume content and never submits.
   submission path.
 - **Never invent content.** The no-invention validator fails generation if any number
   or word carrying a fact is not present in the master profile.
+- **robots.txt is checked, not just claimed.** A gate checks each source host's
+  policy once per run before any fetch, evaluated against the concrete request
+  path and query, and fails closed when it cannot be read (see `[robots]`). It
+  is on by default.
+- **A tailored resume is verified after compilation.** The compiled PDF's page
+  count is measured against `profile.resume_page_limit`; an over-long or
+  unreadable resume is reduced by dropping the least relevant content (never by
+  tightening spacing) or routed to review with the measured count. The text layer
+  must still carry the required sections, keywords and the profile's contact
+  details, compared with LaTeX-aware Unicode folding so a curly apostrophe or an
+  en-dash cannot false-fail a genuinely parseable resume.
 
 ---
 
@@ -349,6 +415,45 @@ facet would have excluded is still discovered and filtered.
 | **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` plus a `location=India` pass without `level` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. That typed slice is not the only path: the API ignores keyword parameters, so a broader `location=India` query without the level facet is merged in and deduplicated by id. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
 | **LinkedIn** (optional reader, disabled by default) | public guest job-search HTML, one pass per configured target query | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** An off-by-default, captain-authorized exception: link-out is the default LinkedIn path. Runs a configurable list of target queries (`[linkedin].keywords`), pages each a few times, and merges/dedupes by job id, so it is not limited to one generic `intern` word. Never logs in, never authenticates, never applies, low rate, degrades gracefully. Never auto-submitted. |
 
+### robots.txt gating
+
+Every automated adapter is gated at the shared fetch layer
+(`jobpilot/http.py`), so no adapter can bypass it by construction. Each host's
+robots.txt is read at most once per run and cached, and the verdict is computed
+for the **concrete request path and query** - not the host root - so a
+path-specific Disallow (for example Himalayas' `Disallow: /jobs*&page=`) is
+honoured. An unreadable policy fails closed (the fetch does not happen), with no
+override of any kind. The rules are the cautious RFC-9309 subset: longest match
+wins with ties to Disallow, a Disallow for the agent (`jobpilot`) or `*` blocks,
+an empty body is allow-all, and a 404 means no published policy (permitted).
+`[robots]` controls this.
+
+| Source | Host checked | Gate result (2026-09-24) |
+| --- | --- | --- |
+| Greenhouse | `boards-api.greenhouse.io` | readable, permits the path |
+| Lever | `api.lever.co` | readable, permits the path |
+| Workable (per-account) | `apply.workable.com` | readable, permits the path |
+| **Himalayas** | `himalayas.app` | **readable, but `Disallow: /jobs*&page=` blocks the paged search API (`...&page=N`), so the fetch is skipped** |
+| Unstop | `unstop.com` | readable, permits the path |
+| Workable (global) | `jobs.workable.com` | readable, permits the path |
+| The Muse | `www.themuse.com` | readable, permits the path |
+| LinkedIn (optional) | `www.linkedin.com` | readable, permits the path |
+| **Ashby** | `api.ashbyhq.com` | **unreadable: HTTP 401 for every user agent; fetch skipped** |
+
+Ashby is therefore not fetched by default: its API host returns 401 for
+`/robots.txt`, so the gate cannot confirm permission and the fetch is skipped.
+This is the intended safe behaviour, not an oversight - the public posting API it
+would use is the documented way to read a board, but jobpilot never overrides an
+unreadable policy. Set `[robots].enabled = false` to disable gating globally
+(not recommended).
+
+Himalayas is not fetched by default either, for a different and equally
+intended reason: its published policy contains `Disallow: /jobs*&page=`, which
+matches the `...&page=N` search API the adapter calls. Because the gate is
+evaluated against the concrete request path, that paged request is refused even
+though the host root is allowed. The path-specific rule is working as intended;
+it is not an oversight.
+
 ### Link-out sources (manual only, never scraped)
 
 Some of the best inventory for a January-May India internship lives on sites whose
@@ -420,9 +525,12 @@ guardrails (missing required field, LinkedIn review-only, dry-run), the
 India-eligible internship is excluded and a technical one is included), the
 one-page fit (an over-long resume is reduced to one page, cutting preserves
 every fact, and the bounded-attempts fallback flags review with the measured
-count), and an integration test that compiles a tailored resume with the real
-LaTeX engine and asserts the PDF is parseable (skipped when the toolchain is
-unavailable).
+count), the robots.txt gate (rule precedence and the fail-closed case), deadline
+extraction/urgency/staleness, the typographic-folding parseability comparison,
+contact-detail verification, the skill-gap heatmap, and the lifecycle (archive
+idempotence, outcome recording, follow-up cadence and the stale sweep). An
+integration test compiles a tailored resume with the real LaTeX engine and
+asserts the PDF is parseable (skipped when the toolchain is unavailable).
 
 ## Limitations
 

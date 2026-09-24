@@ -11,6 +11,7 @@ from jobpilot.applying.base import build_adapter
 from jobpilot.config import Config
 from jobpilot.critique import suggest_red_flags
 from jobpilot.cover_letter import CoverLetterGenerator
+from jobpilot.deadline import extract_deadline
 from jobpilot.discovery import FetchOutcome, discover
 from jobpilot.filtering import filter_posting
 from jobpilot.lexicon import present_surface_forms
@@ -87,6 +88,7 @@ def run_pipeline(
 
         if "match" in stages:
             for posting in postings:
+                _extract_deadline(posting)
                 fr = filter_posting(posting, config.filter)
                 store.upsert_posting(
                     posting,
@@ -191,6 +193,7 @@ def run_manual_pipeline(
     }
     try:
         matcher = Matcher(profile, config)
+        _extract_deadline(posting)
         fr = filter_posting(posting, config.filter)
         store.upsert_posting(
             posting,
@@ -514,10 +517,27 @@ def _run_parseability(config: Config, resume, match, profile) -> None:
         text,
         required_sections=list(config.match.required_sections),
         required_keywords=required_keywords,
+        required_contact=_required_contact(profile),
         min_keyword_survival=float(config.match.min_keyword_survival),
     )
     resume.parseability_ok = ok
     resume.parseability_detail = detail
+
+
+def _required_contact(profile) -> list[str]:
+    """Contact details the compiled text layer must still carry.
+
+    The name and every contact value present in the profile (email, phone,
+    linkedin, github) are required, so a layout failure that swallows the header
+    is caught rather than queued as ready. A profile with no contact block
+    contributes nothing and cannot be failed on it.
+    """
+    values = [profile.name] if profile.name else []
+    for key in ("email", "phone", "linkedin", "github"):
+        value = (profile.contact or {}).get(key)
+        if value:
+            values.append(value)
+    return values
 
 
 def _count_outcome(stats: dict, outcome: ApplyOutcome) -> None:
@@ -531,6 +551,17 @@ def _count_outcome(stats: dict, outcome: ApplyOutcome) -> None:
         stats["dry_run"] += 1
     elif outcome.action == "review":
         stats["queued"] += 1
+
+
+def _extract_deadline(posting: JobPosting) -> None:
+    """Fill a posting's deadline from its text when it states one.
+
+    An adapter-supplied deadline is never overwritten, and a posting with no
+    stated deadline keeps none (absence is not a correction). The deadline is
+    stored, never used as a hard filter.
+    """
+    if not posting.deadline:
+        posting.deadline = extract_deadline(posting)
 
 
 def _postings_from_store(store: Store) -> list[JobPosting]:
@@ -548,6 +579,7 @@ def _postings_from_store(store: Store) -> list[JobPosting]:
             description=row["description"] or "",
             employment_type=row["employment_type"] or "",
             published_at=row["published_at"] or "",
+            deadline=row["deadline"] or "",
             is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
         )
         for row in rows
