@@ -23,8 +23,9 @@ employer, date, metric or project.
    reader that never logs in, never authenticates and never applies. Every source
    is a pluggable adapter behind one interface, and one source failing never
    aborts the run. Before any adapter fetches, a **robots.txt gate** checks each
-   source host once per run (cached) and fails closed: a host whose policy cannot
-   be read, or that disallows the agent, is not fetched. Sources whose terms
+   source host once per run (cached) and evaluates the concrete request path and
+   query; it fails closed: a host whose policy cannot be read, or a path the
+   policy disallows, is not fetched. Sources whose terms
    forbid automation are never scraped: they are surfaced as **link-out** channels
    instead (see below).
 2. **Filtering and matching** - hard filters first (must be an internship, must
@@ -273,8 +274,9 @@ start/end window is untouched.
 - **Never invent content.** The no-invention validator fails generation if any number
   or word carrying a fact is not present in the master profile.
 - **robots.txt is checked, not just claimed.** A gate checks each source host's
-  policy once per run before any fetch and fails closed when it cannot be read
-  (see `[robots]`). It is on by default.
+  policy once per run before any fetch, evaluated against the concrete request
+  path and query, and fails closed when it cannot be read (see `[robots]`). It
+  is on by default.
 - **A tailored resume is verified after compilation.** The compiled PDF's page
   count is measured against `profile.resume_page_limit`; an over-long or
   unreadable resume is reduced by dropping the least relevant content (never by
@@ -415,19 +417,23 @@ facet would have excluded is still discovered and filtered.
 
 ### robots.txt gating
 
-Every automated adapter is gated. Before it fetches, its host's robots.txt is
-read at most once per run and the verdict is cached; an unreadable policy fails
-closed (the fetch does not happen), with no override of any kind. The rules are
-the cautious RFC-9309 subset: longest match wins with ties to Disallow, a
-Disallow for the agent (`jobpilot`) or `*` blocks, an empty body is allow-all,
-and a 404 means no published policy (permitted). `[robots]` controls this.
+Every automated adapter is gated at the shared fetch layer
+(`jobpilot/http.py`), so no adapter can bypass it by construction. Each host's
+robots.txt is read at most once per run and cached, and the verdict is computed
+for the **concrete request path and query** - not the host root - so a
+path-specific Disallow (for example Himalayas' `Disallow: /jobs*&page=`) is
+honoured. An unreadable policy fails closed (the fetch does not happen), with no
+override of any kind. The rules are the cautious RFC-9309 subset: longest match
+wins with ties to Disallow, a Disallow for the agent (`jobpilot`) or `*` blocks,
+an empty body is allow-all, and a 404 means no published policy (permitted).
+`[robots]` controls this.
 
 | Source | Host checked | Gate result (2026-09-24) |
 | --- | --- | --- |
 | Greenhouse | `boards-api.greenhouse.io` | readable, permits the path |
 | Lever | `api.lever.co` | readable, permits the path |
 | Workable (per-account) | `apply.workable.com` | readable, permits the path |
-| Himalayas | `himalayas.app` | readable, permits the path |
+| **Himalayas** | `himalayas.app` | **readable, but `Disallow: /jobs*&page=` blocks the paged search API (`...&page=N`), so the fetch is skipped** |
 | Unstop | `unstop.com` | readable, permits the path |
 | Workable (global) | `jobs.workable.com` | readable, permits the path |
 | The Muse | `www.themuse.com` | readable, permits the path |
@@ -440,6 +446,13 @@ This is the intended safe behaviour, not an oversight - the public posting API i
 would use is the documented way to read a board, but jobpilot never overrides an
 unreadable policy. Set `[robots].enabled = false` to disable gating globally
 (not recommended).
+
+Himalayas is not fetched by default either, for a different and equally
+intended reason: its published policy contains `Disallow: /jobs*&page=`, which
+matches the `...&page=N` search API the adapter calls. Because the gate is
+evaluated against the concrete request path, that paged request is refused even
+though the host root is allowed. The path-specific rule is working as intended;
+it is not an oversight.
 
 ### Link-out sources (manual only, never scraped)
 

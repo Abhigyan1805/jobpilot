@@ -226,11 +226,12 @@ answers_file = "answers.toml"
 # ---------------------------------------------------------------------------
 # robots.txt gate (enforced before any automated fetch)
 # ---------------------------------------------------------------------------
-# Each source host's robots.txt is read at most once per run and cached. The
-# gate fails closed: a host whose policy cannot be read, or that disallows the
-# agent, is skipped rather than fetched. An empty robots.txt is allow-all; a 404
-# means no published policy (permitted); longest-match wins with ties to
-# Disallow; a Disallow for the agent or "*" blocks.
+# Each source host's robots.txt is read at most once per run and cached, and the
+# verdict is computed for the concrete request path and query (not the host
+# root). The gate fails closed: a host whose policy cannot be read, or a path
+# the policy disallows, is skipped rather than fetched. An empty robots.txt is
+# allow-all; a 404 means no published policy (permitted); longest-match wins with
+# ties to Disallow; a Disallow for the agent or "*" blocks.
 [robots]
 enabled = true
 agent = "jobpilot"

@@ -12,8 +12,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
+
+from jobpilot.robots import RobotsGate
 
 DEFAULT_HEADERS = {
     "User-Agent": "jobpilot/0.1 (read-only job discovery; contact: see config)",
@@ -23,6 +26,38 @@ DEFAULT_HEADERS = {
 
 class FetchError(Exception):
     """Raised when a fetch ultimately fails."""
+
+
+class RobotsBlocked(FetchError):
+    """Raised when the active robots.txt gate refuses a concrete request URL."""
+
+
+#: The per-run robots.txt gate. It is installed around the discovery adapter
+#: loop and evaluated here, in the one place every adapter request passes
+#: through, so no adapter can fetch a disallowed path by construction. ``None``
+#: means no gate is active (direct/test callers, or gating disabled).
+_robots_gate: RobotsGate | None = None
+
+
+def set_robots_gate(gate: RobotsGate | None) -> None:
+    global _robots_gate
+    _robots_gate = gate
+
+
+def get_robots_gate() -> RobotsGate | None:
+    return _robots_gate
+
+
+@contextmanager
+def use_robots_gate(gate: RobotsGate | None) -> Iterator[RobotsGate | None]:
+    """Install ``gate`` for the duration of the block, restoring the previous one."""
+    global _robots_gate
+    previous = _robots_gate
+    _robots_gate = gate
+    try:
+        yield gate
+    finally:
+        _robots_gate = previous
 
 
 @dataclass
@@ -52,6 +87,10 @@ def fetch(
     limiter: RateLimiter | None = None,
 ) -> bytes:
     """GET a URL and return raw bytes, retrying transient failures."""
+    if _robots_gate is not None:
+        verdict = _robots_gate.verdict(url)
+        if not verdict.allowed:
+            raise RobotsBlocked(f"robots gate: {verdict.reason}")
     merged = dict(DEFAULT_HEADERS)
     if headers:
         merged.update(headers)

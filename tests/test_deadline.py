@@ -65,6 +65,31 @@ class ExtractDeadlineTests(unittest.TestCase):
             "2026-03-15",
         )
 
+    def test_weak_cue_does_not_reach_into_the_internship_window(self):
+        self.assertEqual(
+            self._extract(
+                "Applications are open. The internship runs June 1, 2026 to August 1, 2026."
+            ),
+            "",
+        )
+
+    def test_weak_cue_does_not_treat_a_same_sentence_window_as_a_range(self):
+        self.assertEqual(
+            self._extract(
+                "Applications are open for the internship running June 1, 2026 to August 1, 2026."
+            ),
+            "",
+        )
+
+    def test_accepted_until_does_not_reach_into_the_internship_window(self):
+        self.assertEqual(
+            self._extract(
+                "Applications are accepted until positions are filled. "
+                "The internship runs 2026-06-01 to 2026-08-01."
+            ),
+            "",
+        )
+
     def test_ordinal_day(self):
         self.assertEqual(self._extract("Apply before 3rd April 2026."), "2026-04-03")
 

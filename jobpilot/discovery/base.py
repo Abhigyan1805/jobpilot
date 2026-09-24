@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from jobpilot.config import Config, SourceConfig
 from jobpilot.http import RateLimiter
 from jobpilot.models import JobPosting
-from jobpilot.robots import RobotsGate
 
 
 @dataclass
@@ -81,24 +80,16 @@ class SourceAdapter(ABC):
     name: str = "base"
     #: Board tokens or search parameters come from config; no default tokens.
     requires_tokens: bool = True
-    #: Hosts this adapter contacts. When a :class:`RobotsGate` is supplied, each
-    #: host is checked once (cached for the run) before :meth:`fetch` runs; a
-    #: host whose robots.txt is unreadable or disallows the agent fails closed.
-    #: A source with no network hosts (the local file reader) leaves this empty.
-    hosts: tuple[str, ...] = ()
 
     def __init__(
         self,
         source_config: SourceConfig,
         config: Config,
         limiter: RateLimiter | None = None,
-        robots: RobotsGate | None = None,
     ):
         self.source_config = source_config
         self.config = config
         self.limiter = limiter or RateLimiter(0.0)
-        #: Per-run robots.txt gate; ``None`` disables gating (direct/test callers).
-        self.robots = robots
         #: Populated by :meth:`fetch` for adapters that run several queries;
         #: :meth:`fetch_safe` copies it onto the :class:`FetchOutcome`.
         self.query_counts: dict[str, int] = {}
@@ -122,13 +113,6 @@ class SourceAdapter(ABC):
             return FetchOutcome(self.name, skipped=True, error="source disabled")
         if self.requires_tokens and not self.tokens:
             return FetchOutcome(self.name, skipped=True, error="no board tokens configured")
-        if self.robots is not None:
-            for host in self.hosts:
-                verdict = self.robots.verdict(f"https://{host}")
-                if not verdict.allowed:
-                    return FetchOutcome(
-                        self.name, skipped=True, error=f"robots gate: {verdict.reason}"
-                    )
         try:
             postings = self.fetch()
         except Exception as exc:  # noqa: BLE001 - one source must not abort the run

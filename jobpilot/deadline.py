@@ -52,7 +52,7 @@ _APPLICATION_CUE_RE = re.compile(
     r"|deadline(?:\s+(?:for|to)\s+apply(?:ing)?)?"
     r"|last\s+date\s+(?:to\s+apply|of\s+application|for\s+application)"
     r"|applications?\s+(?:close|closes|closing|are\s+closed)"
-    r"|applications?\s+(?:are\s+)?(?:accepted|open|available)"
+    rf"|applications?\s+(?:are\s+)?(?:accepted|open|available)(?=\s+(?:\d|(?:{_MONTH_ALT})))"
     r"|(?:accepted|open|available)\s+(?:until|till|through|up\s+to)"
     r")",
     re.IGNORECASE,
@@ -73,6 +73,10 @@ _DAY_FIRST_RE = re.compile(
 # A connector that directly joins two dates states a range ("A to B"); only then
 # is the later date the deadline. Any intervening words break the range.
 _RANGE_CONNECTOR_RE = re.compile(r"\s*(?:-|–|—|through|until|till|to)\s*", re.IGNORECASE)
+# A cue's date lives in its own sentence: a following sentence (typically the
+# internship's own start/end window) is never scanned, so a weak cue cannot pick
+# up the window's end date.
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|\n")
 # How far after a cue to look for its date.
 _LOOKAHEAD = 90
 
@@ -157,6 +161,7 @@ def extract_deadline(posting: JobPosting) -> str:
     for cue_re in (_APPLICATION_CUE_RE, _GENERIC_CUE_RE):
         for cue in cue_re.finditer(text):
             window = text[cue.end(): cue.end() + _LOOKAHEAD]
+            window = _SENTENCE_BOUNDARY_RE.split(window, maxsplit=1)[0]
             chosen = _pick(_date_candidates(window), window)
             if chosen is not None:
                 return chosen.isoformat()

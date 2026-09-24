@@ -12,7 +12,6 @@ POSTINGS_URL = "https://api.lever.co/v0/postings/{token}"
 
 class LeverAdapter(SourceAdapter):
     name = "lever"
-    hosts = ("api.lever.co",)
 
     def fetch(self) -> list[JobPosting]:
         postings: list[JobPosting] = []
