@@ -151,8 +151,14 @@ python3 -m jobpilot --config /mnt/d/jobpilot/config.toml present
 # nothing was submitted.
 ```
 
-`jobpilot present` selected **47 technical matches** (0 borderline, 155
-non-technical/low-relevance queued postings excluded). By source:
+`jobpilot present` selected **47 technical matches** (0 borderline shown, 155
+non-technical/low-relevance queued postings excluded). A further **3** borderline
+postings (technical relevance 0.40: `EdJAMON - AI Professional Internship`,
+`RBP Finivis Private Limited - AI Internship`, `GradGuide - Software Engineering
+Internship`) are held but not shown, because `present` treats borderline as a
+fallback rendered only when nothing clears the relevance floor. The counts
+reconcile exactly with the 205-row pending review queue: **47 included + 0 shown
+borderline + 3 held-but-unshown borderline + 155 excluded = 205**. By source:
 unstop: 39, themuse: 4, greenhouse: 3, workable_global: 1. The presented page is
 `/mnt/d/jobpilot/out/present/index.html` with all 47 resumes + cover letters
 copied under `out/present/assets/`.
@@ -645,9 +651,11 @@ table.** Precisely:
   strong roles (PrepLinc AI, Vortizo AI, Skillorbit, Learntricks, Learn Depth,
   Operonn, ...). All are queued review-only for an unconfirmed window; the
   packets are ready.
-- **Everything else** (the other 155 excluded / 44 unknown-window presented
-  technical matches) is browseable on `out/present/index.html` with tailored
-  resumes and cover letters attached, badge-verified one-page.
+- **Everything else** (the other 155 excluded + the 3 held-but-unshown
+  borderline / 44 unknown-window presented technical matches) is browseable on
+  `out/present/index.html` with tailored resumes and cover letters attached,
+  badge-verified one-page. The 3 held borderline postings are not rendered while
+  any match clears the relevance floor.
 
 ## 13. Verdict
 
