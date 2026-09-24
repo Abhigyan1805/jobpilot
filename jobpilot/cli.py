@@ -326,12 +326,15 @@ def cmd_followups(args) -> int:
             if not stable_id:
                 print(f"no application found for id {args.record!r}", file=sys.stderr)
                 return 1
-            candidate = candidate_for(store, stable_id)
-            store.record_followup(stable_id, note=args.note or "follow-up sent")
+            row = store.record_followup(stable_id, note=args.note or "follow-up sent")
+            if row is None:
+                print(f"no application found for id {args.record!r}", file=sys.stderr)
+                return 1
             _archive_stable_id(store, config, stable_id)
+            candidate = candidate_for(store, stable_id)
             if candidate is not None:
                 print(followup_template(candidate))
-            print(f"\nlogged follow-up #{int(candidate.reminders) + 1 if candidate else 1}")
+                print(f"\nlogged follow-up #{int(candidate.reminders)}")
             return 0
 
         days = args.days if args.days is not None else int(config.lifecycle.followup_days)

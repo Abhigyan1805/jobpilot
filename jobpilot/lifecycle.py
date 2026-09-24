@@ -34,15 +34,10 @@ VALID_OUTCOMES = (
     "withdrawn",
 )
 FINAL_OUTCOMES = frozenset({"hired", "rejected", "no_response", "offer_declined", "withdrawn"})
-OPEN_OUTCOMES = frozenset(VALID_OUTCOMES) - FINAL_OUTCOMES
 
 
 def is_final(outcome) -> bool:
     return (outcome or "").strip().lower() in FINAL_OUTCOMES
-
-
-def is_open(outcome) -> bool:
-    return not is_final(outcome)
 
 
 def normalize_outcome(value: str) -> str:
@@ -89,17 +84,6 @@ class Candidate:
     status: str
     quiet_days: int
     reminders: int
-    apply_url: str
-
-    def row(self) -> tuple:
-        return (
-            self.app_id,
-            self.company,
-            self.title,
-            self.outcome or self.status,
-            self.quiet_days,
-            self.reminders,
-        )
 
 
 def _tracked(row, approved: set[str]) -> bool:
@@ -118,7 +102,6 @@ def _candidate(row, quiet: int) -> Candidate:
         status=row["status"] or "",
         quiet_days=quiet,
         reminders=int(row["reminders"] or 0),
-        apply_url=row["apply_url"] or "",
     )
 
 

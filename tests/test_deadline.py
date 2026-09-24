@@ -47,6 +47,24 @@ class ExtractDeadlineTests(unittest.TestCase):
             "2025-03-15",
         )
 
+    def test_internship_window_after_the_deadline_is_not_the_deadline(self):
+        self.assertEqual(
+            self._extract("Apply before 2026-03-15. The internship runs 2026-06-01 to 2026-08-01."),
+            "2026-03-15",
+        )
+
+    def test_cohort_date_after_the_deadline_is_not_the_deadline(self):
+        self.assertEqual(
+            self._extract("Apply by 2026-03-15 to be considered for the June 1, 2026 cohort."),
+            "2026-03-15",
+        )
+
+    def test_generic_closure_does_not_outrank_an_explicit_cue(self):
+        self.assertEqual(
+            self._extract("The office closes on 2026-12-25 for the holidays. Apply by 2026-03-15."),
+            "2026-03-15",
+        )
+
     def test_ordinal_day(self):
         self.assertEqual(self._extract("Apply before 3rd April 2026."), "2026-04-03")
 

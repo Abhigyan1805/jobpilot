@@ -263,6 +263,18 @@ class CliLifecycleTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(self.store.latest_application("cli-3")["outcome"], "no_response")
 
+    def test_followup_record_without_an_application_fails(self):
+        self.store.upsert_posting(posting(job_id="cli-4"))
+        rc = main(["--config", str(self.config_path), "followups", "--record", "greenhouse:cli-4"])
+        self.assertEqual(rc, 1)
+        self.assertIsNone(self.store.latest_application("greenhouse:cli-4"))
+
+    def test_followup_record_logs_the_reminder(self):
+        _insert_application(self.store, "cli-5")
+        rc = main(["--config", str(self.config_path), "followups", "--record", "cli-5"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(int(self.store.latest_application("cli-5")["reminders"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

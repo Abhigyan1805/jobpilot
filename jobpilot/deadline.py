@@ -23,7 +23,6 @@ internship's own start/end window (which the structural window classifier owns).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 from jobpilot.models import JobPosting
@@ -45,18 +44,23 @@ MONTHS = {
 _MONTH_ALT = "|".join(sorted(MONTHS, key=len, reverse=True))
 
 # Phrases that introduce the *application* deadline, never the internship window.
-_CUE_RE = re.compile(
+# These are explicit: an explicit application cue always outranks the generic
+# closure cue below.
+_APPLICATION_CUE_RE = re.compile(
     r"(?:"
     r"appl(?:y|ies|ication|ications)\s+(?:by|before|no\s+later\s+than)"
     r"|deadline(?:\s+(?:for|to)\s+apply(?:ing)?)?"
     r"|last\s+date\s+(?:to\s+apply|of\s+application|for\s+application)"
     r"|applications?\s+(?:close|closes|closing|are\s+closed)"
-    r"|closes?\s+(?:on|by)"
     r"|applications?\s+(?:are\s+)?(?:accepted|open|available)"
     r"|(?:accepted|open|available)\s+(?:until|till|through|up\s+to)"
     r")",
     re.IGNORECASE,
 )
+# A generic closure phrase ("the office closes on ..."). It is only consulted
+# when no explicit application cue yielded a date, so it cannot report a
+# non-application closure as the deadline.
+_GENERIC_CUE_RE = re.compile(r"closes?\s+(?:on|by)", re.IGNORECASE)
 _ISO_RE = re.compile(r"\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b")
 _MONTH_FIRST_RE = re.compile(
     rf"\b({_MONTH_ALT})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{{2}})\b",
@@ -66,7 +70,9 @@ _DAY_FIRST_RE = re.compile(
     rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_ALT})\.?,?\s+((?:19|20)\d{{2}})\b",
     re.IGNORECASE,
 )
-_RANGE_CONNECTOR_RE = re.compile(r"\s(?:-|–|—|through|until|till|to)\s", re.IGNORECASE)
+# A connector that directly joins two dates states a range ("A to B"); only then
+# is the later date the deadline. Any intervening words break the range.
+_RANGE_CONNECTOR_RE = re.compile(r"\s*(?:-|–|—|through|until|till|to)\s*", re.IGNORECASE)
 # How far after a cue to look for its date.
 _LOOKAHEAD = 90
 
@@ -89,11 +95,13 @@ def parse_iso_deadline(value) -> date | None:
         return None
 
 
-def _date_candidates(window: str) -> list[tuple[int, date]]:
-    candidates: list[tuple[int, date]] = []
+def _date_candidates(window: str) -> list[tuple[int, int, date]]:
+    candidates: list[tuple[int, int, date]] = []
     for match in _ISO_RE.finditer(window):
         try:
-            candidates.append((match.start(), date(int(match.group(1)), int(match.group(2)), int(match.group(3)))))
+            candidates.append(
+                (match.start(), match.end(), date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+            )
         except ValueError:
             continue
     for match in _MONTH_FIRST_RE.finditer(window):
@@ -101,7 +109,9 @@ def _date_candidates(window: str) -> list[tuple[int, date]]:
         if not month:
             continue
         try:
-            candidates.append((match.start(), date(int(match.group(3)), month, int(match.group(2)))))
+            candidates.append(
+                (match.start(), match.end(), date(int(match.group(3)), month, int(match.group(2))))
+            )
         except ValueError:
             continue
     for match in _DAY_FIRST_RE.finditer(window):
@@ -109,41 +119,47 @@ def _date_candidates(window: str) -> list[tuple[int, date]]:
         if not month:
             continue
         try:
-            candidates.append((match.start(), date(int(match.group(3)), month, int(match.group(1)))))
+            candidates.append(
+                (match.start(), match.end(), date(int(match.group(3)), month, int(match.group(1))))
+            )
         except ValueError:
             continue
     candidates.sort(key=lambda item: item[0])
     return candidates
 
 
-def _pick(candidates: list[tuple[int, date]], window: str) -> date | None:
+def _pick(candidates: list[tuple[int, int, date]], window: str) -> date | None:
     if not candidates:
         return None
     if len(candidates) == 1:
-        return candidates[0][1]
+        return candidates[0][2]
     first, last = candidates[0], candidates[-1]
-    between = window[first[0]: last[0]]
-    # "accepted through X" / "from A to B" states a range: the deadline is the end.
-    if _RANGE_CONNECTOR_RE.search(between):
-        return last[1]
-    return first[1]
+    between = window[first[1]: last[0]]
+    # Only a connector that directly joins the two dates is a range ("A to B");
+    # a sentence or extra words in between (an internship window) is not.
+    if _RANGE_CONNECTOR_RE.fullmatch(between):
+        return last[2]
+    return first[2]
 
 
 def extract_deadline(posting: JobPosting) -> str:
     """Return the posting's stated application deadline as ``YYYY-MM-DD`` or ``""``.
 
     The cue phrase must be present, so a bare date in the body (an internship
-    start/end window, a posted date) is never mistaken for a deadline. A cue with
-    no unambiguous date after it yields no deadline rather than a guess.
+    start/end window, a posted date) is never mistaken for a deadline. An
+    explicit application cue is tried first; the generic closure cue is only a
+    fallback. A cue with no unambiguous date after it yields no deadline rather
+    than a guess.
     """
     text = " ".join(part for part in [posting.description, posting.title] if part)
     if not text:
         return ""
-    for cue in _CUE_RE.finditer(text):
-        window = text[cue.end(): cue.end() + _LOOKAHEAD]
-        chosen = _pick(_date_candidates(window), window)
-        if chosen is not None:
-            return chosen.isoformat()
+    for cue_re in (_APPLICATION_CUE_RE, _GENERIC_CUE_RE):
+        for cue in cue_re.finditer(text):
+            window = text[cue.end(): cue.end() + _LOOKAHEAD]
+            chosen = _pick(_date_candidates(window), window)
+            if chosen is not None:
+                return chosen.isoformat()
     return ""
 
 
@@ -208,22 +224,3 @@ def format_deadline(
     status = deadline_status(deadline, today=today, closing_soon_days=closing_soon_days)
     label = {"expired": "expired", "closing_soon": "closing soon", "open": "open"}.get(status, "")
     return f"{deadline} ({label})" if label else str(deadline)
-
-
-@dataclass
-class DeadlineInfo:
-    deadline: str = ""
-    status: str = ""
-    stale_days: int | None = None
-
-    def label(self) -> str:
-        return format_deadline(self.deadline)
-
-
-def info_for(posting: JobPosting, *, today: date | None = None, stale_days: int = 30) -> DeadlineInfo:
-    deadline = extract_deadline(posting)
-    return DeadlineInfo(
-        deadline=deadline,
-        status=deadline_status(deadline, today=today),
-        stale_days=staleness_days(posting.published_at, today=today),
-    )

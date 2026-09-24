@@ -417,33 +417,29 @@ facet would have excluded is still discovered and filtered.
 
 Every automated adapter is gated. Before it fetches, its host's robots.txt is
 read at most once per run and the verdict is cached; an unreadable policy fails
-closed (the fetch does not happen). The rules are the cautious RFC-9309 subset:
-longest match wins with ties to Disallow, a Disallow for the agent (`jobpilot`)
-or `*` blocks, an empty body is allow-all, and a 404 means no published policy
-(permitted). `[robots]` controls this; `allow_unreadable_sources` is the only
-override, and it overrides **only** an unreadable verdict - a readable robots.txt
-that disallows the agent still blocks.
+closed (the fetch does not happen), with no override of any kind. The rules are
+the cautious RFC-9309 subset: longest match wins with ties to Disallow, a
+Disallow for the agent (`jobpilot`) or `*` blocks, an empty body is allow-all,
+and a 404 means no published policy (permitted). `[robots]` controls this.
 
-| Source | Host checked | Gate result (2026-09-24) | Override |
-| --- | --- | --- | --- |
-| Greenhouse | `boards-api.greenhouse.io` | readable, permits the path | - |
-| Lever | `api.lever.co` | readable, permits the path | - |
-| Workable (per-account) | `apply.workable.com` | readable, permits the path | - |
-| Himalayas | `himalayas.app` | readable, permits the path | - |
-| Unstop | `unstop.com` | readable, permits the path | - |
-| Workable (global) | `jobs.workable.com` | readable, permits the path | - |
-| The Muse | `www.themuse.com` | readable, permits the path | - |
-| LinkedIn (optional) | `www.linkedin.com` | readable, permits the path | - |
-| **Ashby** | `api.ashbyhq.com` | **unreadable: HTTP 401 for every user agent** | **`allow_unreadable_sources = ["ashby"]`** |
+| Source | Host checked | Gate result (2026-09-24) |
+| --- | --- | --- |
+| Greenhouse | `boards-api.greenhouse.io` | readable, permits the path |
+| Lever | `api.lever.co` | readable, permits the path |
+| Workable (per-account) | `apply.workable.com` | readable, permits the path |
+| Himalayas | `himalayas.app` | readable, permits the path |
+| Unstop | `unstop.com` | readable, permits the path |
+| Workable (global) | `jobs.workable.com` | readable, permits the path |
+| The Muse | `www.themuse.com` | readable, permits the path |
+| LinkedIn (optional) | `www.linkedin.com` | readable, permits the path |
+| **Ashby** | `api.ashbyhq.com` | **unreadable: HTTP 401 for every user agent; fetch skipped** |
 
-Ashby is the single override, recorded explicitly rather than hardcoded: its API
-host returns 401 for `/robots.txt` (Greenhouse and Unstop return 200), while the
-public posting API it uses is the documented way to read a board. Failing closed
-there would silently drop the entire Ashby source and the internships it
-contributes, so the unreadable verdict is overridden for that one source and the
-evidence is recorded here and in `config.example.toml`. Remove `"ashby"` from
-`[robots].allow_unreadable_sources` to fail closed for it too; set
-`[robots].enabled = false` to disable gating globally (not recommended).
+Ashby is therefore not fetched by default: its API host returns 401 for
+`/robots.txt`, so the gate cannot confirm permission and the fetch is skipped.
+This is the intended safe behaviour, not an oversight - the public posting API it
+would use is the documented way to read a board, but jobpilot never overrides an
+unreadable policy. Set `[robots].enabled = false` to disable gating globally
+(not recommended).
 
 ### Link-out sources (manual only, never scraped)
 

@@ -91,20 +91,6 @@ class RobotsGateTests(unittest.TestCase):
         self.assertFalse(gate.verdict("https://example.com/jobs").allowed)
         self.assertTrue(gate.verdict("https://example.com/other").allowed)
 
-    def test_unreadable_override_permits(self):
-        def boom(url):
-            raise TimeoutError("no answer")
-
-        gate = RobotsGate(fetch=boom)
-        verdict = gate.verdict("https://example.com/jobs", allow_unreadable=True)
-        self.assertTrue(verdict.allowed)
-        self.assertIn("override", verdict.reason)
-
-    def test_override_never_permits_a_readable_disallow(self):
-        gate = RobotsGate(fetch=lambda url: ("User-agent: *\nDisallow: /jobs\n", 200))
-        verdict = gate.verdict("https://example.com/jobs", allow_unreadable=True)
-        self.assertFalse(verdict.allowed)
-
     def test_verdict_is_cached_per_host(self):
         calls = {"n": 0}
 
@@ -158,30 +144,17 @@ class FetchSafeGateTests(unittest.TestCase):
         self.assertTrue(outcome.ok)
         self.assertEqual(adapter.fetched, 1)
 
-    def test_configured_source_override_permits_an_unreadable_robots(self):
+    def test_unreadable_robots_skips_the_fetch(self):
         def boom(url):
             raise TimeoutError("no answer")
 
         cfg = test_config()
-        cfg.robots.allow_unreadable_sources = ["counting"]
         gate = RobotsGate(fetch=boom)
         adapter = _CountingAdapter(cfg.sources["greenhouse"], cfg, robots=gate)
         outcome = adapter.fetch_safe()
-        self.assertTrue(outcome.ok, outcome.error)
-        self.assertEqual(adapter.fetched, 1)
-
-    def test_override_does_not_permit_a_readable_disallow(self):
-        cfg = test_config()
-        cfg.robots.allow_unreadable_sources = ["counting"]
-        gate = RobotsGate(fetch=lambda url: ("User-agent: *\nDisallow: /\n", 200))
-        adapter = _CountingAdapter(cfg.sources["greenhouse"], cfg, robots=gate)
-        outcome = adapter.fetch_safe()
         self.assertTrue(outcome.skipped)
+        self.assertIn("robots gate", outcome.error)
         self.assertEqual(adapter.fetched, 0)
-
-    def test_default_config_overrides_ashby_only(self):
-        cfg = test_config()
-        self.assertIn("ashby", cfg.robots.allow_unreadable_sources)
 
 
 class _Response:

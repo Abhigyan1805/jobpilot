@@ -160,19 +160,14 @@ class RobotsGate:
         #: verdict is then computed from the cached body.
         self._cache: dict[str, tuple[str | None, int | None, str | None]] = {}
 
-    def verdict(self, url: str, *, allow_unreadable: bool = False) -> RobotsVerdict:
-        """Permission to fetch ``url``; robots.txt is read once per host per run.
-
-        ``allow_unreadable`` is the explicit per-source override: it only turns
-        an *unreadable* robots.txt into permission, never a readable policy that
-        disallows the agent. The fetched body is still cached once per host.
-        """
+    def verdict(self, url: str) -> RobotsVerdict:
+        """Permission to fetch ``url``; robots.txt is read once per host per run."""
         parts = urlsplit(url)
         host = parts.netloc.lower()
         if host not in self._cache:
             self._cache[host] = self._fetch_host(parts)
         body, code, error = self._cache[host]
-        return self._evaluate(parts, body, code, error, allow_unreadable=allow_unreadable)
+        return self._evaluate(parts, body, code, error)
 
     def _fetch_host(self, parts) -> tuple[str | None, int | None, str | None]:
         scheme = parts.scheme or "https"
@@ -189,18 +184,16 @@ class RobotsGate:
         body: str | None,
         code: int | None,
         error: str | None,
-        *,
-        allow_unreadable: bool = False,
     ) -> RobotsVerdict:
         if error is not None:
-            return self._unreadable(f"UNCONFIRMED ({error}) - robots.txt could not be read", allow_unreadable)
+            return RobotsVerdict(False, f"UNCONFIRMED ({error}) - robots.txt could not be read")
         if code == 404:
             return RobotsVerdict(True, "ALLOWED - no robots.txt published")
         if code != 200:
-            return self._unreadable(f"UNCONFIRMED (HTTP {code}) - robots.txt could not be read", allow_unreadable)
+            return RobotsVerdict(False, f"UNCONFIRMED (HTTP {code}) - robots.txt could not be read")
         if not is_robots_body(body or ""):
-            return self._unreadable(
-                "UNCONFIRMED (HTTP 200 but the body is not a robots.txt)", allow_unreadable
+            return RobotsVerdict(
+                False, "UNCONFIRMED (HTTP 200 but the body is not a robots.txt)"
             )
         path = unquote(parts.path) or "/"
         if parts.query:
@@ -209,11 +202,3 @@ class RobotsGate:
             if not allowed(body or "", agent, path):
                 return RobotsVerdict(False, f"DISALLOWED for {agent} - robots.txt forbids this path")
         return RobotsVerdict(True, "ALLOWED - robots.txt permits this path")
-
-    @staticmethod
-    def _unreadable(reason: str, allow_unreadable: bool) -> RobotsVerdict:
-        if allow_unreadable:
-            return RobotsVerdict(
-                True, f"{reason}; permitted by the configured per-source override"
-            )
-        return RobotsVerdict(False, reason)

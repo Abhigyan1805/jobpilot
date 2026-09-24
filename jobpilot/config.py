@@ -380,24 +380,11 @@ class RobotsConfig:
     fails closed, so a host whose robots.txt cannot be read is not fetched. The
     agent token is what jobpilot matches against a robots.txt ``User-agent``
     line (``*`` is always also checked).
-
-    ``allow_unreadable_sources`` is the explicit, per-source override for the
-    narrow case where a host serves no readable robots.txt but its API is
-    documented for third-party consumption. It only overrides the *unreadable*
-    verdict - a readable robots.txt that disallows the agent still blocks. The
-    default lists ``ashby``:
-
-        api.ashbyhq.com/robots.txt returns HTTP 401 for every user agent
-        (verified 2026-09-24), while Ashby's public posting API
-        (``api.ashbyhq.com/posting-api/job-board/<token>``) is the documented
-        way to read a board. The alternative is losing a legitimate source
-        entirely. Remove the name to fail closed for Ashby too.
     """
 
     enabled: bool = True
     agent: str = "jobpilot"
     timeout: float = 12.0
-    allow_unreadable_sources: list[str] = field(default_factory=lambda: ["ashby"])
 
 
 @dataclass
