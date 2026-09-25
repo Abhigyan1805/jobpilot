@@ -8,13 +8,19 @@ the tailored PDFs beside a self-contained page and make the safety state visible
 
 from __future__ import annotations
 
+import functools
+import http.server
 import io
 import tempfile
+import threading
 import unittest
+import urllib.request
 from contextlib import redirect_stdout
+from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+from urllib.parse import urljoin
 
 from jobpilot.cli import main
 from jobpilot.matching import Matcher
@@ -59,6 +65,30 @@ def candidate(
         review_category=review_category,
         review_reason=review_reason,
     )
+
+
+class _Anchors(HTMLParser):
+    """Collect every ``<a>`` as ``(href, target, text)`` from generated HTML."""
+
+    def __init__(self):
+        super().__init__()
+        self.links: list[tuple[str, str, str]] = []
+        self._current: dict | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "a":
+            return
+        attrs = dict(attrs)
+        self._current = {"href": attrs.get("href", ""), "target": attrs.get("target", ""), "text": ""}
+
+    def handle_data(self, data):
+        if self._current is not None:
+            self._current["text"] += data
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._current is not None:
+            self.links.append((self._current["href"], self._current["target"], self._current["text"].strip()))
+            self._current = None
 
 
 class SelectionTests(unittest.TestCase):
@@ -290,6 +320,67 @@ class RenderTests(unittest.TestCase):
         self.assertEqual([p.name for p in copied], ["cover_letter.pdf", "resume.pdf"])
         self.assertTrue(all(p.read_bytes().startswith(b"%PDF") for p in copied))
 
+    def test_card_title_and_primary_action_open_the_tailored_resume_pdf(self):
+        selection = self._selection()
+        index = render_page(selection, self.cfg, Path(self.tmp.name) / "present")
+        html = index.read_text(encoding="utf-8")
+
+        # The job title is a plain relative anchor to the copied resume PDF, so
+        # the obvious click opens the resume even from file:// with no server.
+        self.assertRegex(
+            html, r'<a class="title-link" href="assets/[^"]+/resume\.pdf" target="_blank"'
+        )
+        # The card's primary action button opens the same resume PDF.
+        self.assertRegex(
+            html, r'<a class="btn resume" href="assets/[^"]+/resume\.pdf" target="_blank"'
+        )
+        # The posting link is a separate, clearly-labelled button - not the same
+        # affordance as "read the resume I generated".
+        self.assertIn('class="btn apply"', html)
+        self.assertIn('href="https://example.com/apply/ml"', html)
+        # Works with no JavaScript at all.
+        self.assertNotIn("<script", html)
+
+    def test_live_page_serves_the_resume_to_the_obvious_click(self):
+        # Drive the generated page over a real localhost HTTP server: the job
+        # title and the primary "Open tailored resume PDF" action must resolve
+        # to the copied resume PDF and actually serve its bytes, while the
+        # posting link stays a separate affordance.
+        selection = self._selection()
+        out = Path(self.tmp.name) / "present"
+        render_page(selection, self.cfg, out)
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):  # keep test output quiet
+                pass
+
+        httpd = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), functools.partial(Handler, directory=str(out))
+        )
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, timeout=5)
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+
+        page_url = f"http://127.0.0.1:{httpd.server_address[1]}/index.html"
+        with urllib.request.urlopen(page_url, timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+        parser = _Anchors()
+        parser.feed(body)
+
+        title = next(a for a in parser.links if a[2] == "Machine Learning Intern")
+        self.assertEqual(title[1], "_blank")
+        primary = next(a for a in parser.links if a[2].startswith("Open tailored resume PDF"))
+        self.assertEqual(primary[0], title[0])
+        self.assertEqual(primary[1], "_blank")
+        apply_link = next(a for a in parser.links if a[0] == "https://example.com/apply/ml")
+        self.assertNotEqual(apply_link[0], title[0])
+
+        with urllib.request.urlopen(urljoin(page_url, title[0]), timeout=10) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertTrue(resp.read().startswith(b"%PDF"))
+
     def test_render_empty_selection_says_so_honestly(self):
         index = render_page(SelectionResult(), self.cfg, Path(self.tmp.name) / "present")
         html = index.read_text(encoding="utf-8")
@@ -310,6 +401,9 @@ class RenderTests(unittest.TestCase):
         self.assertIn("No resume PDF was produced.", html)
         self.assertIn("No cover letter PDF was produced.", html)
         self.assertNotIn("<iframe", html)
+        # With no resume there is no browser affordance to open one.
+        self.assertNotIn('class="title-link"', html)
+        self.assertNotIn('class="btn resume"', html)
 
     def test_strong_band_window_review_is_labelled_review_only(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))
