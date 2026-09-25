@@ -113,8 +113,8 @@ data science intern: ... ; research intern: ... ; software engineer intern: ...
 
 Live `https://www.linkedin.com/robots.txt` ends with `User-agent: *` /
 `Disallow: /`. Per-query counts are all **0 / blocked**. The gate correctly wins
-over the optional reader. (The README's LinkedIn robots row still says
-"readable, permits the path" — see §7, D4.)
+over the optional reader. (At run time the README's LinkedIn robots row said
+"readable, permits the path"; it is corrected in this change — see §7, D4.)
 
 ## 3. Funnel
 
@@ -409,13 +409,14 @@ on the card (the card shows `Jan-May 2027 (confidence 1.00)`), but `queue list`
 / `postings` still print the raw store label. Classification and confidence are
 correct (Jan-May 2027, conf 1.0). Not fixed.
 
-### D4. (documentation drift, inherited) The README's LinkedIn robots row is still wrong
+### D4. (documentation drift, inherited; corrected in this change) The README's LinkedIn robots row understated the gate
 
-The README source table says LinkedIn is "readable, permits the path"; live
-`https://www.linkedin.com/robots.txt` has `User-agent: *` / `Disallow: /`, so
-the optional reader cannot run under the enforced gate (as this run and
-resweep-12 both show). Flagged again for a normal documentation change; not
-fixed here.
+At run time the README robots table listed LinkedIn as "readable, permits the
+path"; live `https://www.linkedin.com/robots.txt` has `User-agent: *` /
+`Disallow: /`, so the optional reader cannot run under the enforced gate (as
+this run and resweep-12 both show). Flagged again for a normal documentation
+change; the row is corrected in this change (`README.md`, robots.txt gating
+table).
 
 ### D5. (minor) `workable_global` returned 68 but stored 67
 
