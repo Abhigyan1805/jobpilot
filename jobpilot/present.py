@@ -61,6 +61,7 @@ class ReviewCandidate:
     review_reason: str = ""
     page_count: int = 0
     page_limit: int = 0
+    parseability_ok: bool | None = None
 
     @property
     def company(self) -> str:
@@ -149,6 +150,9 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
         if posting_row is None:
             continue
         route_row = store.latest_review_application(row["stable_id"])
+        parseability_ok = None
+        if route_row is not None and route_row["parseability_ok"] is not None:
+            parseability_ok = bool(route_row["parseability_ok"])
         candidates.append(
             ReviewCandidate(
                 review_id=int(row["id"]),
@@ -167,6 +171,7 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
                 review_reason=(route_row["review_reason"] or "") if route_row else "",
                 page_count=int(row["resume_pages"] or 0),
                 page_limit=int(row["resume_page_limit"] or 0),
+                parseability_ok=parseability_ok,
             )
         )
     return candidates
@@ -382,9 +387,20 @@ h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
   background: var(--chip); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted);
   max-width: 100%; overflow-wrap: anywhere;
 }
-.pagebadge { display: inline-block; border-radius: 999px; padding: 3px 11px; font-size: 12px; margin-top: 10px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pagebadge, .parsebadge { display: inline-block; border-radius: 999px; padding: 3px 11px; font-size: 12px; }
 .pagebadge.ok { background: var(--good-bg); color: var(--good); }
 .pagebadge.warn { background: var(--bad-bg); color: var(--bad); font-weight: 700; }
+.parsebadge.ok { background: var(--good-bg); color: var(--good); }
+.parsebadge.fail { background: var(--bad-bg); color: var(--bad); font-weight: 700; }
+.parsefail {
+  background: var(--bad-bg); border: 1px solid #f0b4ae; color: var(--bad);
+  border-radius: 8px; padding: 8px 11px; font-size: 13px; margin-top: 12px;
+}
+.parsewarn {
+  background: var(--bad-bg); border: 1px solid #f0b4ae; color: var(--bad);
+  border-radius: 10px; padding: 12px 14px; margin: 0 0 22px; font-size: 14px; font-weight: 600;
+}
 .meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0; color: var(--muted); font-size: 13px; }
 .meta span { overflow-wrap: anywhere; }
 .meta b { color: var(--ink); font-weight: 600; }
@@ -463,6 +479,62 @@ def _page_badge(candidate: ReviewCandidate) -> str:
         f'<span class="pagebadge warn">Resume is {candidate.page_count} pages, '
         f"limit is {candidate.page_limit} \u2014 needs attention</span>"
     )
+
+
+_PARSEABILITY_FAILED_PREFIX = "parseability check failed:"
+
+
+def _parseability_reason(candidate: ReviewCandidate) -> str:
+    """The stored human-readable parseability failure detail, if the store has one.
+
+    ``applications.review_reason`` prefixes the resume checks with
+    ``"parseability check failed: "``; strip that marker so the card names the
+    actual failure (for example ``missing sections: Projects``). When the route
+    reason does not carry that marker, fall back to the whole stored reason.
+    """
+    reason = (candidate.review_reason or "").strip()
+    if _PARSEABILITY_FAILED_PREFIX in reason:
+        detail = reason.split(_PARSEABILITY_FAILED_PREFIX, 1)[1].strip()
+        return detail or reason
+    return reason
+
+
+def _parseability_badge(candidate: ReviewCandidate) -> str:
+    """A visible parseability badge beside the page count.
+
+    ``None`` means the store has no verdict for this row, so no pass is claimed.
+    """
+    if candidate.parseability_ok is None:
+        return ""
+    if candidate.parseability_ok:
+        return '<span class="parsebadge ok">Resume: parseable \u2713</span>'
+    return '<span class="parsebadge fail">Resume: parseability failed</span>'
+
+
+def _badge_row(candidate: ReviewCandidate) -> str:
+    parts = [p for p in (_page_badge(candidate), _parseability_badge(candidate)) if p]
+    if not parts:
+        return ""
+    return f'<div class="badges">{"".join(parts)}</div>'
+
+
+def _parseability_note(candidate: ReviewCandidate) -> str:
+    """An unmistakable warning naming why a failed resume must be fixed."""
+    if candidate.parseability_ok is not False:
+        return ""
+    reason = _parseability_reason(candidate) or "the resume did not pass the parseability check"
+    return (
+        f'<div class="parsefail"><b>Resume parseability failed:</b> {_esc(reason)}. '
+        "Fix this before the packet is sent.</div>"
+    )
+
+
+def _presented_matches(selection: SelectionResult) -> list[PresentMatch]:
+    return [*selection.included, *selection.borderline]
+
+
+def _failed_parseability(matches: list[PresentMatch]) -> list[PresentMatch]:
+    return [m for m in matches if m.candidate.parseability_ok is False]
 
 
 def _tags(values: list[str], kind: str) -> str:
@@ -548,7 +620,8 @@ def _render_card(
         <span><b>Technical relevance:</b> {match.technical_relevance:.2f}{_esc(f" ({match.best_domain})" if match.best_domain else "")}</span>
       </div>
       <div class="chips"><span class="chip">{_esc(domains or "no target domains")}</span></div>
-      {_page_badge(c)}
+      {_badge_row(c)}
+      {_parseability_note(c)}
       <div class="skills">
         <div>
           <h3>Matched skills (in the master profile)</h3>
@@ -585,6 +658,21 @@ def _pdf_block(label: str, rel: str) -> str:
 def _render_document(selection: SelectionResult, config: Config, cards: list[str], generated_at: str) -> str:
     matched = len(selection.included)
     borderline = len(selection.borderline)
+    parse_failures = _failed_parseability(_presented_matches(selection))
+    if parse_failures:
+        count = len(parse_failures)
+        if count == 1:
+            parse_warning = (
+                '<div class="parsewarn">1 presented packet failed the resume parseability '
+                "check and needs fixing before it is sent.</div>"
+            )
+        else:
+            parse_warning = (
+                f'<div class="parsewarn">{count} presented packets failed the resume '
+                "parseability check and need fixing before they are sent.</div>"
+            )
+    else:
+        parse_warning = ""
     if not cards:
         body = (
             '<div class="empty"><h2>No technical matches to show</h2>'
@@ -633,6 +721,7 @@ def _render_document(selection: SelectionResult, config: Config, cards: list[str
     <div class="stat"><b>{len(selection.excluded)}</b><span>excluded</span></div>
     <div class="stat"><b>0</b><span>submitted</span></div>
   </div>
+  {parse_warning}
   <div class="safety"><strong>Nothing was submitted.</strong>
     <span>This is a read-only review surface built from a dry run. It never applies to
     anything; you submit from the direct link when you choose. Technical domains in use:

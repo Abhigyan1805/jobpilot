@@ -51,6 +51,7 @@ def candidate(
     cover="",
     review_category="",
     review_reason="",
+    parseability_ok=None,
 ):
     return ReviewCandidate(
         review_id=1,
@@ -64,6 +65,7 @@ def candidate(
         cover_pdf=cover,
         review_category=review_category,
         review_reason=review_reason,
+        parseability_ok=parseability_ok,
     )
 
 
@@ -386,6 +388,103 @@ class RenderTests(unittest.TestCase):
         html = index.read_text(encoding="utf-8")
         self.assertIn("No technical matches to show", html)
         self.assertIn("Nothing was submitted", html)
+
+    def test_failed_parseability_renders_warning_and_named_reason(self):
+        failed = candidate(
+            posting(job_id="parse-fail", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            parseability_ok=False,
+            review_reason="parseability check failed: missing sections: Projects",
+        )
+        selection = select_matches([failed], self.matcher, self.cfg)
+        index = render_page(selection, self.cfg, Path(self.tmp.name) / "present")
+        html = index.read_text(encoding="utf-8")
+
+        # A failed resume is named on its card and the reason is quoted, so the
+        # card can never present it as fine.
+        self.assertIn("Resume: parseability failed", html)
+        self.assertIn("missing sections: Projects", html)
+
+    def test_passed_parseability_renders_no_warning(self):
+        passed = candidate(
+            posting(job_id="parse-pass", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            parseability_ok=True,
+            review_reason="Jan-Jun window unconfirmed; review before applying",
+        )
+        selection = select_matches([passed], self.matcher, self.cfg)
+        index = render_page(selection, self.cfg, Path(self.tmp.name) / "present")
+        html = index.read_text(encoding="utf-8")
+
+        self.assertIn("Resume: parseable", html)
+        self.assertNotIn("parseability failed", html)
+        self.assertNotIn('class="parsewarn"', html)
+
+    def test_page_summary_appears_only_when_a_failure_is_present(self):
+        failed = candidate(
+            posting(job_id="parse-fail", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            parseability_ok=False,
+            review_reason="parseability check failed: missing sections: Projects",
+        )
+        passed = candidate(
+            posting(job_id="parse-pass", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            parseability_ok=True,
+        )
+        mixed = select_matches([failed, passed], self.matcher, self.cfg)
+        html = render_page(mixed, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("1 presented packet failed the resume parseability check", html)
+
+        clean = select_matches([passed], self.matcher, self.cfg)
+        clean_html = render_page(clean, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("presented packet", clean_html)
+        self.assertNotIn('class="parsewarn"', clean_html)
+
+    def test_build_candidates_reads_parseability_from_the_application_record(self):
+        store = Store(self.cfg.resolve(self.cfg.output.database))
+        try:
+            p = posting(job_id="parse-store", title="Machine Learning Intern", description=ML_JD)
+            store.upsert_posting(p, eligible=True)
+            match = Matcher(mini_profile(), self.cfg).match(p)
+            plan = ApplicationPlan(posting=p, match=match)
+            plan.resume = GeneratedResume(
+                pdf_path=str(self.resume),
+                parseability_ok=False,
+                parseability_detail="missing sections: Projects",
+            )
+            plan.requires_review = True
+            store.create_application(
+                plan,
+                status="manual_required",
+                mode="review",
+                review_category="parseability",
+                review_reason="parseability check failed: missing sections: Projects",
+            )
+            store.enqueue_review(plan, packet_dir="")
+            candidates = build_candidates(store)
+        finally:
+            store.close()
+
+        self.assertEqual(len(candidates), 1)
+        self.assertIs(candidates[0].parseability_ok, False)
+        selection = select_matches(candidates, self.matcher, self.cfg)
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("missing sections: Projects", html)
 
     def test_stale_pdf_path_renders_missing_fallback_not_broken_iframe(self):
         gone = candidate(
