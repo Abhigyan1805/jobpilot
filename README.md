@@ -176,7 +176,13 @@ missing channel or auto-apply config); a strong-band role the pipeline routed to
 review for a blocking reason (for example an unconfirmed window), and every
 link-out, LinkedIn or non-strong-band role, is labelled review-only. Each card
 also shows the measured page count of its tailored resume (`Resume: 1-page ✓`,
-or a warning badge when it is over the limit and needs attention).
+or a warning badge when it is over the limit and needs attention) and the
+resume's stored parseability verdict (`Resume: parseable ✓`, or a red
+`Resume: parseability failed` badge; a row with no stored verdict shows no
+badge and claims no pass). A failed card names the stored failure detail when
+there is one (`missing sections: Projects`) and otherwise says only that the
+resume did not pass the check, and a banner above the cards counts the presented
+packets that still need fixing before they are sent.
 
 Selection is deliberately narrow: only genuine technical, software-engineering,
 data and AI/ML roles are shown. Unrelated internships (design, UX,
