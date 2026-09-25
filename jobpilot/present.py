@@ -489,14 +489,15 @@ def _parseability_reason(candidate: ReviewCandidate) -> str:
 
     ``applications.review_reason`` prefixes the resume checks with
     ``"parseability check failed: "``; strip that marker so the card names the
-    actual failure (for example ``missing sections: Projects``). When the route
-    reason does not carry that marker, fall back to the whole stored reason.
+    actual failure (for example ``missing sections: Projects``). A route reason
+    that lacks the marker is not a parseability detail - the parseability block
+    may not have run at all (``[match].require_parseable = false``) - so it is
+    never presented as one.
     """
     reason = (candidate.review_reason or "").strip()
-    if _PARSEABILITY_FAILED_PREFIX in reason:
-        detail = reason.split(_PARSEABILITY_FAILED_PREFIX, 1)[1].strip()
-        return detail or reason
-    return reason
+    if _PARSEABILITY_FAILED_PREFIX not in reason:
+        return ""
+    return reason.split(_PARSEABILITY_FAILED_PREFIX, 1)[1].strip()
 
 
 def _parseability_badge(candidate: ReviewCandidate) -> str:

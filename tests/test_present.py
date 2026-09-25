@@ -407,6 +407,25 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Resume: parseability failed", html)
         self.assertIn("missing sections: Projects", html)
 
+    def test_failed_parseability_without_detail_does_not_blame_the_route_reason(self):
+        failed = candidate(
+            posting(job_id="parse-fail-nodetail", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            parseability_ok=False,
+            review_reason="auto-apply disabled by config",
+        )
+        selection = select_matches([failed], self.matcher, self.cfg)
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Resume parseability failed", html)
+        self.assertIn("the resume did not pass the parseability check", html)
+        note = html[html.index('<div class="parsefail">') : html.index("</div>", html.index('<div class="parsefail">'))]
+        self.assertNotIn("auto-apply disabled by config", note)
+
     def test_passed_parseability_renders_no_warning(self):
         passed = candidate(
             posting(job_id="parse-pass", title="Machine Learning Intern", description=ML_JD),
