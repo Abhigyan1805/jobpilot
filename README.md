@@ -433,7 +433,7 @@ wins with ties to Disallow, a Disallow for the agent (`jobpilot`) or `*` blocks,
 an empty body is allow-all, and a 404 means no published policy (permitted).
 `[robots]` controls this.
 
-| Source | Host checked | Gate result (2026-09-24) |
+| Source | Host checked | Gate result (2026-09-25) |
 | --- | --- | --- |
 | Greenhouse | `boards-api.greenhouse.io` | readable, permits the path |
 | Lever | `api.lever.co` | readable, permits the path |
@@ -442,7 +442,7 @@ an empty body is allow-all, and a 404 means no published policy (permitted).
 | Unstop | `unstop.com` | readable, permits the path |
 | Workable (global) | `jobs.workable.com` | readable, permits the path |
 | The Muse | `www.themuse.com` | readable, permits the path |
-| LinkedIn (optional) | `www.linkedin.com` | readable, permits the path |
+| LinkedIn (optional) | `www.linkedin.com` | readable but **disallows the path** (`User-agent: *` / `Disallow: /`), so the guest reader cannot run under the gate even with `[linkedin].enabled = true`; fetch skipped |
 | **Ashby** | `api.ashbyhq.com` | **unreadable: HTTP 401 for every user agent; fetch skipped** |
 
 Ashby is therefore not fetched by default: its API host returns 401 for
