@@ -48,6 +48,15 @@ class ExtractDeadlineTests(unittest.TestCase):
             "2025-03-15",
         )
 
+    def test_headless_apply_range_takes_the_closing_date(self):
+        # A bare "apply" cue introducing a date range is an opening cue: the
+        # deadline is the range's end, so a still-open window is not rejected.
+        self.assertEqual(
+            self._extract("Machine Learning internship. You may apply 2026-01-01 to 2026-12-31."),
+            "2026-12-31",
+        )
+        self.assertEqual(self._extract("Apply 2026-09-01 - 2026-12-31"), "2026-12-31")
+
     def test_internship_window_after_the_deadline_is_not_the_deadline(self):
         self.assertEqual(
             self._extract("Apply before 2026-03-15. The internship runs 2026-06-01 to 2026-08-01."),

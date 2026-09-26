@@ -70,7 +70,7 @@ _MONEY_LPA_RE = re.compile(rf"{_AMOUNT}\s*{_LPA_PERIOD}\b", re.IGNORECASE)
 # to the whole range, so both ends are thousands. An LPA range ("6-8 LPA") is the
 # same idea with the lakh unit.
 _RANGE_K_RE = re.compile(
-    r"(\d[\d,]*(?:\.\d+)?)\s*[-–]\s*(\d[\d,]*(?:\.\d+)?)\s*[kK]\b",
+    r"(\d[\d,]*(?:\.\d+)?)\s*([kK])?\s*[-–]\s*(\d[\d,]*(?:\.\d+)?)\s*([kK])\b",
     re.IGNORECASE,
 )
 _RANGE_LPA_RE = re.compile(
@@ -98,12 +98,15 @@ _DURATION_AFTER_RE = re.compile(
 _AFTER_PERIOD_RE = re.compile(
     r"\s*(?:/-)?\s*(?:"
     r"(?:(?:per[-\s]+|/\s*|a\s+|an\s+)(?P<unit>months?|years?|annum|weeks?|days?|hours?|hrs?|wk|wks))\b"
-    r"|(?P<word>monthly|yearly|annually|hourly|daily|weekly|fortnightly)\b"
+    r"|(?P<word>monthly|yearly|annually|annual|hourly|daily|weekly|fortnightly)\b"
     r"|(?P<pa>p\.?\s*a\.?)(?![a-z])"
     r")",
     re.IGNORECASE,
 )
-_YEAR_UNITS = frozenset({"year", "years", "annum", "yearly", "annually"})
+#: A leading "annual"/"yearly" descriptor before a figure ("Annual stipend:
+#: ₹3,00,000", "Stipend (annual): ₹3,00,000") marks the whole figure as yearly.
+_PREPOSED_YEAR_RE = re.compile(r"\b(?:annual|yearly)\b", re.IGNORECASE)
+_YEAR_UNITS = frozenset({"year", "years", "annum", "annual", "yearly", "annually"})
 _MONTH_UNITS = frozenset({"month", "months", "monthly"})
 
 #: A one-time total stated over a duration ("₹60,000 for 3 months") is a lump
@@ -119,7 +122,7 @@ _LUMP_SUM_RE = re.compile(
 #: when this connector actually appears between two collected figures; two
 #: unrelated figures are never rendered as a low-high range.
 _RANGE_BETWEEN_RE = re.compile(
-    r"^\s*(?:[-–—]|to|through|till|until)\s*(?:(?:₹|rs\.?|inr|rupees?)\s*)?$",
+    r"^\s*[kK]?\s*(?:[-–—]|to|through|till|until)\s*(?:(?:₹|rs\.?|inr|rupees?)\s*)?$",
     re.IGNORECASE,
 )
 
@@ -151,6 +154,13 @@ _CUE_RE = re.compile(
     r"\bstipend\b|\bsalary\b|\bremuneration\b|\bcompensation\b|\bpay\b",
     re.IGNORECASE,
 )
+
+#: Cue strength, used to pick the posting's governing figure: a figure tied to
+#: the stipend itself outranks a figure tied to the broader pay package, which
+#: outranks a figure with no pay cue at all. "CTC ₹6,00,000/annum. Stipend
+#: ₹15,000/month." is a ₹15,000 stipend, not a ₹50,000 one.
+_STRONG_CUE_RE = re.compile(r"\bstipend\b|\bremuneration\b", re.IGNORECASE)
+_MEDIUM_CUE_RE = re.compile(r"\bsalary\b|\bcompensation\b|\bpay\b", re.IGNORECASE)
 
 #: A figure in one of these contexts is not the stipend *base* and must never
 #: drag a qualifying base below the floor: a headcount ("40 employees"), a
@@ -237,6 +247,7 @@ class _Amount:
     conditional: bool = False
     nonbase: bool = False
     divisor: int = 1
+    cue_rank: int = 0  # 2 stipend/remuneration, 1 salary/compensation/pay, 0 none
 
     @property
     def monthly(self) -> int:
@@ -249,14 +260,14 @@ class _Amount:
         return not self.conditional and not self.nonbase
 
 
-def _clause_at(text: str, start: int) -> str:
-    """The clause (bounded by ``+``/``;``/``|``/newline/sentence/comma) around ``start``."""
+def _clause_span(text: str, start: int) -> tuple[int, int]:
+    """The bounds of the clause (``+``/``;``/``|``/newline/sentence/comma) around ``start``."""
     left = 0
     for boundary in _CLAUSE_BOUNDARY_RE.finditer(text, 0, start):
         left = boundary.end()
     following = _CLAUSE_BOUNDARY_RE.search(text, start)
     right = following.start() if following is not None else len(text)
-    return text[left:right]
+    return left, right
 
 
 def _is_conditional(clause: str) -> bool:
@@ -265,6 +276,14 @@ def _is_conditional(clause: str) -> bool:
 
 def _is_nonbase(clause: str) -> bool:
     return bool(_NONBASE_RE.search(clause))
+
+
+def _cue_rank(clause: str) -> int:
+    if _STRONG_CUE_RE.search(clause):
+        return 2
+    if _MEDIUM_CUE_RE.search(clause):
+        return 1
+    return 0
 
 
 def _overlaps(covered: list[tuple[int, int]], start: int, end: int) -> bool:
@@ -320,9 +339,12 @@ def _add(
     # A bare number only counts when its own clause talks about stipends; a
     # number in a neighbouring clause (experience, headcount, a PIN code) is not
     # the stipend and must never drag the governing figure below the floor.
-    clause = _clause_at(text, start)
+    clause_left, clause_right = _clause_span(text, start)
+    clause = text[clause_left:clause_right]
     if bare and not _CUE_RE.search(clause):
         return
+    if period is None and _PREPOSED_YEAR_RE.search(text[clause_left:start]):
+        kind = "year"
     divisor = 1
     if lump_ok and period is None:
         lump = _LUMP_SUM_RE.match(text, match.end())
@@ -339,6 +361,7 @@ def _add(
             conditional=_is_conditional(clause),
             nonbase=_is_nonbase(clause),
             divisor=divisor,
+            cue_rank=_cue_rank(clause),
         )
     )
     covered.append((match.start(), match.end()))
@@ -352,6 +375,7 @@ def _add_range(
     *,
     multiplier: int,
     kind: str,
+    value_groups: tuple[int, int] = (1, 2),
 ) -> None:
     """Record both ends of a shorthand range whose unit applies to both numbers."""
     if _overlaps(covered, match.start(), match.end()):
@@ -361,7 +385,11 @@ def _add_range(
         return
     if period == "year":
         kind = "year"
-    for group_start in (1, 2):
+    clause_left, clause_right = _clause_span(text, match.start(value_groups[0]))
+    clause = text[clause_left:clause_right]
+    if period is None and _PREPOSED_YEAR_RE.search(text[clause_left:match.start(value_groups[0])]):
+        kind = "year"
+    for group_start in value_groups:
         number = match.group(group_start)
         value = _to_int(number, None, multiplier)
         if value is None:
@@ -369,7 +397,6 @@ def _add_range(
         start, end = match.start(group_start), match.end(group_start)
         if _DURATION_AFTER_RE.match(text, end):
             continue
-        clause = _clause_at(text, start)
         amounts.append(
             _Amount(
                 start=start,
@@ -378,6 +405,7 @@ def _add_range(
                 kind=kind,
                 conditional=_is_conditional(clause),
                 nonbase=_is_nonbase(clause),
+                cue_rank=_cue_rank(clause),
             )
         )
     covered.append((match.start(), match.end()))
@@ -387,7 +415,9 @@ def _collect_amounts(text: str) -> list[_Amount]:
     amounts: list[_Amount] = []
     covered: list[tuple[int, int]] = []
     for match in _RANGE_K_RE.finditer(text):
-        _add_range(amounts, covered, text, match, multiplier=1000, kind="month")
+        _add_range(
+            amounts, covered, text, match, multiplier=1000, kind="month", value_groups=(1, 3)
+        )
     for match in _RANGE_LPA_RE.finditer(text):
         _add_range(amounts, covered, text, match, multiplier=100_000, kind="year")
     for match in _MONEY_MONTH_RE.finditer(text):
@@ -425,14 +455,18 @@ def classify_stipend(
     # allowance), which must not drag a qualifying base below the floor.
     base = [a for a in amounts if a.is_base]
     if base:
-        ordered = sorted(base, key=lambda a: a.start)
-        values = [a.monthly for a in ordered]
-        ranged = len(ordered) > 1 and any(
-            _RANGE_BETWEEN_RE.match(text[ordered[i].end : ordered[i + 1].start])
+        groups: dict[int, list[_Amount]] = {}
+        for amount in base:
+            groups.setdefault(amount.cue_rank, []).append(amount)
+        ordered = sorted(groups[max(groups)], key=lambda a: a.start)
+        pairs = [
+            (ordered[i], ordered[i + 1])
             for i in range(len(ordered) - 1)
-        )
-        if ranged:
-            low, high = min(values), max(values)
+            if _RANGE_BETWEEN_RE.match(text[ordered[i].end : ordered[i + 1].start])
+        ]
+        if pairs:
+            low = min(pairs[0][0].monthly, pairs[0][1].monthly)
+            high = max(pairs[0][0].monthly, pairs[0][1].monthly)
         else:
             low = high = ordered[0].monthly
         state = CONFIRMED_GE_FLOOR if low >= int(floor) else CONFIRMED_BELOW_FLOOR

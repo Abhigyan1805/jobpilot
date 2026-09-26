@@ -72,6 +72,33 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
         self.assertEqual(info.amount, 25000)  # 3,00,000 / 12
 
+    def test_annual_adjective_is_read_as_a_yearly_figure(self):
+        # "annual"/"yearly" as a preposed or postposed adjective is an annual
+        # figure (₹3,00,000 / 12 = ₹25,000), not a monthly one.
+        for text in (
+            "Annual stipend: ₹3,00,000",
+            "Stipend (annual): ₹3,00,000",
+            "Stipend: ₹3,00,000 annual",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR, text)
+            self.assertEqual(info.amount, 25000, text)
+        # A preposed monthly form stays monthly.
+        monthly = classify_stipend("Monthly stipend ₹30,000")
+        self.assertEqual(monthly.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(monthly.amount, 30000)
+
+    def test_k_suffixed_range_is_detected_on_either_end(self):
+        both = classify_stipend("Stipend: 30k - 40k /month")
+        self.assertEqual(both.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual((both.amount, both.amount_high), (30000, 40000))
+        self.assertEqual(both.display_label(), "₹30,000-40,000/mo confirmed")
+
+        below = classify_stipend("Stipend: 10k-15k /month")
+        self.assertEqual(below.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual((below.amount, below.amount_high), (10000, 15000))
+        self.assertEqual(below.display_label(), "₹10,000-15,000/mo below floor")
+
     def test_floor_is_configurable(self):
         self.assertEqual(classify_stipend("₹25,000/month", floor=20000).state, CONFIRMED_GE_FLOOR)
         self.assertEqual(classify_stipend("₹25,000/month", floor=30000).state, CONFIRMED_BELOW_FLOOR)
@@ -214,6 +241,24 @@ class GoverningFigureTests(unittest.TestCase):
         info = classify_stipend("Stipend: ₹10,000/month")
         self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
         self.assertTrue(info.dropped)
+
+    def test_stipend_cue_outranks_an_earlier_package_figure(self):
+        # An earlier CTC/salary figure over the floor must not override the
+        # sub-floor monthly stipend that actually governs.
+        for text in (
+            "CTC ₹6,00,000/annum. Stipend ₹15,000/month.",
+            "Annual salary: 6,00,000. Stipend: 15,000 per month",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR, text)
+            self.assertEqual(info.amount, 15000, text)
+            self.assertTrue(info.dropped, text)
+
+    def test_range_high_comes_from_the_stated_stipend_range_not_a_package_figure(self):
+        info = classify_stipend("Stipend: ₹30,000-40,000/month. CTC: ₹6,00,000 per annum.")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual((info.amount, info.amount_high), (30000, 40000))
+        self.assertEqual(info.display_label(), "₹30,000-40,000/mo confirmed")
 
     def test_range_lower_bound_semantics_are_kept(self):
         below = classify_stipend("Stipend: ₹25,000-35,000/month")

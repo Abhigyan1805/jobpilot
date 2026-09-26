@@ -84,6 +84,19 @@ class AssessOpenStateTests(unittest.TestCase):
         state = assess_open_state(posting(description="Machine learning internship."), today=TODAY)
         self.assertIsNone(state.open)
 
+    def test_headless_apply_range_still_open_is_not_closed(self):
+        # The opening date of the application range is in the past but the close
+        # is in the future, so the posting must stay open, not be rejected.
+        p = posting(
+            source="greenhouse",
+            description=(
+                "Machine Learning internship. You may apply 2026-01-01 to 2026-12-31. "
+                "Python, RAG."
+            ),
+        )
+        state = assess_open_state(p, today=TODAY)
+        self.assertFalse(state.closed)
+
 
 class FilterIntegrationTests(unittest.TestCase):
     def setUp(self):
