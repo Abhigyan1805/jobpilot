@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass
 
 from jobpilot.models import CheckResult, FilterResult, JobPosting
+from jobpilot.openstate import assess_open_state
+from jobpilot.stipend import DROPPED_STATES, UNSTATED, classify_stipend
 from jobpilot.window import WindowInfo, classify_window
 
 # Countries/regions that, if the only location named, mean onsite work there.
@@ -230,10 +232,10 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
 def review_only_reasons(posting: JobPosting, cfg) -> list[str]:
     """Reasons ambiguous postings must be human-reviewed before auto-applying.
 
-    A work-authorization restriction, or a full-time cue that clashes with an
-    internship signal, is too uncertain to auto-apply on but too weak to
-    discard: the posting stays in the pipeline for scoring and goes to the
-    review queue.
+    A work-authorization restriction, a full-time cue that clashes with an
+    internship signal, or a stipend with no stated figure is too uncertain to
+    auto-apply on but too weak to discard: the posting stays in the pipeline
+    for scoring and goes to the review queue.
     """
     reasons: list[str] = []
     loc = assess_location(posting, cfg)
@@ -242,6 +244,10 @@ def review_only_reasons(posting: JobPosting, cfg) -> list[str]:
     ft = fulltime_check(posting, cfg)
     if ft.review_only:
         reasons.append(ft.detail)
+    text = posting.description or ""
+    info = classify_stipend(text, floor=int(getattr(cfg, "stipend_floor", 30000)))
+    if info.state == UNSTATED:
+        reasons.append("stipend not stated; verify before applying")
     return reasons
 
 
@@ -270,6 +276,39 @@ def window_check(posting: JobPosting, cfg) -> tuple[CheckResult, WindowInfo]:
     ), info
 
 
+def open_state_check(posting: JobPosting, cfg) -> CheckResult:
+    """Reject a posting whose application is actually closed.
+
+    The decision is shared by every source (a stated past deadline, or closed
+    text) and additionally reads Unstop's typed registration metadata when the
+    row carries it. An unverified/unknown state passes: it is not a failure.
+    """
+    state = assess_open_state(posting)
+    if state.closed:
+        return CheckResult("application_open", False, state.reason, 0.0)
+    return CheckResult("application_open", True, state.reason or "not stated", 0.5)
+
+
+def stipend_check(posting: JobPosting, cfg) -> CheckResult:
+    """Enforce the configured monthly stipend floor.
+
+    ``confirmed_below_floor`` and ``unpaid`` postings are rejected (dropped);
+    a confirmed amount at/above the floor passes, and a posting whose stipend is
+    not stated passes too so it can be surfaced separately for verification.
+    The state is computed where it is used (here and in ``present``); it is not
+    persisted, so there is a single definition of it.
+    """
+    text = posting.description or ""
+    info = classify_stipend(
+        text,
+        floor=int(getattr(cfg, "stipend_floor", 30000)),
+    )
+    if info.state in DROPPED_STATES:
+        return CheckResult("stipend", False, info.display_label(), 0.0)
+    score = 1.0 if info.amount else 0.5
+    return CheckResult("stipend", True, info.display_label(), score)
+
+
 def filter_posting(posting: JobPosting, cfg) -> FilterResult:
     checks: list[CheckResult] = []
     reasons: list[str] = []
@@ -278,6 +317,8 @@ def filter_posting(posting: JobPosting, cfg) -> FilterResult:
     checks.append(fulltime_check(posting, cfg))
     checks.append(seniority_check(posting, cfg))
     checks.append(location_check(posting, cfg))
+    checks.append(open_state_check(posting, cfg))
+    checks.append(stipend_check(posting, cfg))
     win_check, info = window_check(posting, cfg)
     checks.append(win_check)
 

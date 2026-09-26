@@ -227,7 +227,8 @@ class Store:
             """
             INSERT INTO postings (
                 stable_id, source, job_id, company, title, url, apply_url, apply_email,
-                location, employment_type, published_at, deadline, description, is_remote, eligible,
+                location, employment_type, published_at, deadline, description, is_remote,
+                eligible,
                 window_label, window_confidence, reject_reasons, seen_at, updated_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(stable_id) DO UPDATE SET

@@ -304,7 +304,8 @@ class FilteringTests(unittest.TestCase):
             is_remote=True,
             description=(
                 "Machine learning internship January 2026 - June 2026. "
-                "Our customers are based across Europe. Python, RAG."
+                "Our customers are based across Europe. Python, RAG. "
+                "Stipend: ₹40,000/month."
             ),
         )
         result = filter_posting(p, self.cfg.filter)

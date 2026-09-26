@@ -354,8 +354,8 @@ class UnstopTests(unittest.TestCase):
         "status": "LIVE",
         "seo_url": "https://unstop.com/internships/ml-1617053",
         "public_url": "internships/ml-1617053",
-        "start_date": "2026-01-10T00:00:00+05:30",
-        "end_date": "2026-06-30T00:00:00+05:30",
+        "start_date": "2027-01-10T00:00:00+05:30",
+        "end_date": "2027-06-30T00:00:00+05:30",
         "region": "online",
         "locations": [{"name": "Bengaluru"}],
         "organisation": {"name": "Aurora Labs"},
@@ -373,9 +373,29 @@ class UnstopTests(unittest.TestCase):
         self.assertEqual(posting.company, "Aurora Labs")
         self.assertEqual(posting.url, "https://unstop.com/internships/ml-1617053")
         self.assertEqual(posting.employment_type, "Internship")
-        self.assertIn("2026-01-10 - 2026-06-30", posting.description)
+        self.assertIn("2027-01-10 - 2027-06-30", posting.description)
         self.assertIn("Machine Learning", posting.description)
         self.assertIn("Bengaluru", posting.location)
+
+    def test_captures_registration_metadata(self):
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        row = {
+            **self.ROW,
+            "regn_open": 1,
+            "end_date": "2030-06-30T00:00:00+05:30",
+        }
+        posting = adapter._normalise(row)
+        self.assertEqual(posting.raw["regn_open"], 1)
+        self.assertEqual(posting.raw["end_date"], "2030-06-30T00:00:00+05:30")
+
+    def test_open_state_filter_rejects_past_registration_end_date(self):
+        cfg = test_config()
+        adapter = UnstopAdapter(_source(cfg, "unstop"), cfg)
+        row = {**self.ROW, "regn_open": 1, "end_date": "2020-01-05T00:00:00+05:30"}
+        posting = adapter._normalise(row)
+        result = filter_posting(posting, cfg.filter)
+        self.assertFalse(result.eligible)
+        self.assertTrue(any("application_open" in r for r in result.reject_reasons))
 
     def test_typed_start_end_window_is_a_verified_in_window_range(self):
         cfg = test_config()
@@ -383,7 +403,7 @@ class UnstopTests(unittest.TestCase):
         posting = adapter._normalise(dict(self.ROW))
         result = filter_posting(posting, cfg.filter)
         self.assertTrue(result.eligible, result.reject_text())
-        self.assertEqual(result.window_label, "Jan-Jun 2026")
+        self.assertEqual(result.window_label, "Jan-Jun 2027")
         self.assertEqual(result.window_confidence, 1.0)
 
     def test_typed_window_survives_deadline_prose_in_the_next_segment(self):
@@ -403,7 +423,7 @@ class UnstopTests(unittest.TestCase):
 
         result = filter_posting(posting, cfg.filter)
         self.assertTrue(result.eligible, result.reject_text())
-        self.assertEqual(result.window_label, "Jan-Jun 2026")
+        self.assertEqual(result.window_label, "Jan-Jun 2027")
         self.assertEqual(result.window_confidence, 1.0)
 
     def test_fetch_skips_finished_and_stops_on_last_page(self):

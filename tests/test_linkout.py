@@ -164,7 +164,7 @@ class WindowIsoRangeTests(unittest.TestCase):
         cfg = test_config()
         p = posting(
             job_id="modal-may-range-1",
-            description="Machine Learning Intern. You may apply 2025-08-01 to 2025-11-30. Python, RAG.",
+            description="Machine Learning Intern. You may apply 2027-08-01 to 2027-11-30. Python, RAG.",
         )
         result = filter_posting(p, cfg.filter)
         self.assertEqual(result.window_label, "unknown")
@@ -188,8 +188,8 @@ class WindowIsoRangeTests(unittest.TestCase):
         p = posting(
             job_id="application-period-verb-1",
             description=(
-                "Machine Learning Intern. Application period begins 2025-08-01 to "
-                "2025-11-30. Python, RAG."
+                "Machine Learning Intern. Application period begins 2027-08-01 to "
+                "2027-11-30. Python, RAG."
             ),
         )
         result = filter_posting(p, cfg.filter)
@@ -237,7 +237,7 @@ class WindowIsoRangeTests(unittest.TestCase):
             job_id="employment-type-context-1",
             title="Machine Learning Intern",
             employment_type="Internship",
-            description="Deadline: 2025-09-01 through 2025-11-30.",
+            description="Deadline: 2027-09-01 through 2027-11-30.",
         )
         info = classify_window(p.searchable_text(), cfg.filter, prose=p.description)
         self.assertIsNone(info.overlaps)
@@ -265,8 +265,8 @@ class WindowIsoRangeTests(unittest.TestCase):
         p = posting(
             job_id="deadline-range-1",
             description=(
-                "Machine learning internship. Applications accepted 2025-08-01 through "
-                "2025-11-30. Python, RAG, LLMs."
+                "Machine learning internship. Applications accepted 2027-08-01 through "
+                "2027-11-30. Python, RAG, LLMs."
             ),
         )
         result = filter_posting(p, cfg.filter)

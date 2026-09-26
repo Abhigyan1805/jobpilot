@@ -15,9 +15,10 @@ Two rules from the upstream study are honoured:
 * **Absence is not a correction.** A posting with no stated deadline keeps no
   deadline and its status is never changed by one.
 
-The deadline is deliberately *not* a hard filter: an expired posting is surfaced
-as expired but never dropped, and a deadline is never confused with the
-internship's own start/end window (which the structural window classifier owns).
+The deadline is never confused with the internship's own start/end window (which
+the structural window classifier owns). An *expired* deadline is surfaced as
+expired and also closes the posting through the shared open-state check in
+``jobpilot/openstate.py``; an absent deadline never changes a posting's status.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ _MONTH_ALT = "|".join(sorted(MONTHS, key=len, reverse=True))
 _CLOSE_CUE_RE = re.compile(
     r"(?:"
     r"appl(?:y|ies|ication|ications)\s+(?:by|before|no\s+later\s+than)"
-    r"|appl(?:y|ies)\b"
+    r"|(?P<bare_apply>appl(?:y|ies)\b)"
     r"|deadline(?:\s+(?:for|to)\s+apply(?:ing)?)?"
     r"|last\s+date\s+(?:to\s+apply|of\s+application|for\s+application)"
     r"|applications?\s+(?:close|closes|closing|are\s+closed)(?:\s+on)?"
@@ -177,9 +178,15 @@ def extract_deadline(posting: JobPosting) -> str:
     if not text:
         return ""
     for cue in _CLOSE_CUE_RE.finditer(text):
-        bound = _leading_date(text[cue.end():])
-        if bound is not None:
-            return bound[2].isoformat()
+        rest = text[cue.end():]
+        bound = _leading_date(rest)
+        if bound is None:
+            continue
+        if cue.group("bare_apply") is not None:
+            end = _range_end(rest, bound)
+            if end is not None:
+                return end.isoformat()
+        return bound[2].isoformat()
     for cue in _OPEN_CUE_RE.finditer(text):
         rest = text[cue.end():]
         bound = _leading_date(rest)

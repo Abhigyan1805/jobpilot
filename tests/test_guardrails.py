@@ -9,9 +9,14 @@ from jobpilot.models import SubmissionResult
 from jobpilot.store import Store
 from tests.helpers import FakeAdapter, plan_for, posting, test_config
 
-# A description with a confirmed Jan-Jun window, so these guardrail tests
-# exercise the gate under test rather than the unknown-window review gate.
-IN_WINDOW = "Machine learning internship, January 2026 - June 2026. Python, RAG."
+# A description with a confirmed Jan-Jun window and a stated stipend, so these
+# guardrail tests exercise the gate under test rather than the unknown-window or
+# unstated-stipend review gates.
+IN_WINDOW = (
+    "Machine learning internship, January 2026 - June 2026. Python, RAG. "
+    "Stipend: ₹40,000/month."
+)
+IN_WINDOW_NO_STIPEND = "Machine learning internship, January 2026 - June 2026. Python, RAG."
 
 
 class RequiredFieldAdapter(SubmissionAdapter):
@@ -119,10 +124,34 @@ class GuardrailTests(unittest.TestCase):
         cfg = test_config(Path(self.tmp.name), filt={"allow_unknown_window": True})
         adapter = FakeAdapter(cfg)
         applier = Applier(self.store, cfg, adapter, cfg.output.dir)
-        plan = plan_for(posting(job_id="unknown-window-2"))
+        plan = plan_for(
+            posting(
+                job_id="unknown-window-2",
+                description="Machine learning internship. Python, RAG. Stipend: ₹40,000/month.",
+            )
+        )
         outcome = applier.process(plan)
         self.assertEqual(outcome.status, "submitted")
         self.assertEqual(adapter.calls, [plan.posting.stable_id])
+
+    def test_unstated_stipend_is_review_only_never_auto_applied(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(job_id="stipend-unstated-1", description=IN_WINDOW_NO_STIPEND)
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.action, "review")
+        self.assertEqual(outcome.status, "filter_review")
+        self.assertEqual(adapter.calls, [])
+        self.assertFalse(self.store.has_submitted(p.stable_id))
+        self.assertIn(p.stable_id, [r["stable_id"] for r in self.store.list_review("pending")])
+
+    def test_confirmed_at_floor_stipend_still_auto_applies(self):
+        adapter = FakeAdapter(self.cfg)
+        applier = Applier(self.store, self.cfg, adapter, self.cfg.output.dir)
+        p = posting(job_id="stipend-confirmed-1", description=IN_WINDOW)
+        outcome = applier.process(plan_for(p))
+        self.assertEqual(outcome.status, "submitted")
+        self.assertEqual(adapter.calls, [p.stable_id])
 
     def test_deadline_iso_range_is_not_a_verified_window_for_auto_apply(self):
         adapter = FakeAdapter(self.cfg)

@@ -128,6 +128,24 @@ allow_unknown_location = false   # a posting with no location is rejected
 window_start_month = 1
 window_end_month = 6
 
+# Minimum monthly stipend (INR/month by design; the extractor reads only
+# INR-marked amounts - ₹/Rs/INR, "15,000-18,000/ month", "1K"/"1.5K", "INR 6
+# LPA" - and never invents an amount). A confirmed figure at or above this is
+# shown in the main `present` list; a confirmed figure below it (including an
+# "up to" cap that is itself below the floor), or an explicitly unpaid /
+# commission-only posting, is dropped; a performance-conditioned stipend, an
+# "up to" cap at or above the floor, or a posting whose stipend is not stated, is
+# shown in a separate "Stipend not stated - verify" section rather than silently
+# failing the floor.
+stipend_floor = 30000
+
+# Postings you have already applied to, excluded from `jobpilot present`
+# entirely (matched by url or stable id/source+job_id, so a re-discovery is
+# excluded while a new same-company/same-title posting is not). This is a filter,
+# never a deletion from the store. Defaults to the shipped list; set it to "" to
+# disable the exclusion entirely.
+exclude_file = "data/applied-postings.toml"
+
 # ---------------------------------------------------------------------------
 # Matching rubric (deterministic; ranks for review, does not predict outcomes)
 # ---------------------------------------------------------------------------
@@ -238,7 +256,8 @@ agent = "jobpilot"
 timeout = 12.0
 
 # ---------------------------------------------------------------------------
-# Deadline urgency and posting staleness (display only; never a hard filter)
+# Deadline urgency and posting staleness (a past deadline closes the posting;
+# urgency/staleness labels are display only)
 # ---------------------------------------------------------------------------
 [deadline]
 closing_soon_days = 7   # a stored deadline this many days away is "closing soon"

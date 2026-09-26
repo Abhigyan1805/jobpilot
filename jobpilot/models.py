@@ -20,7 +20,8 @@ class JobPosting:
     employment_type: str = ""
     published_at: str = ""
     #: Application deadline as an ISO ``YYYY-MM-DD`` date when the posting states
-    #: one; empty otherwise. Never guessed and never used as a hard filter.
+    #: one; empty otherwise. Never guessed; a *past* deadline closes the posting
+    #: through the shared open-state check.
     deadline: str = ""
     apply_url: str = ""
     apply_email: str = ""

@@ -29,8 +29,10 @@ employer, date, metric or project.
    forbid automation are never scraped: they are surfaced as **link-out** channels
    instead (see below).
 2. **Filtering and matching** - hard filters first (must be an internship, must
-   plausibly run in Jan-Jun, must be open to India or remote from India), then a
-   deterministic, documented scoring rubric against the master profile.
+   plausibly run in Jan-Jun, must be open to India or remote from India, must not
+   be a closed application and must not show a confirmed below-floor or unpaid
+   stipend), then a deterministic, documented scoring rubric against the master
+   profile.
 3. **Tailored resume generation** - selects, reorders and re-emphasises profile
    content in the exact existing LaTeX style, then compiles it to PDF. Also produces
    a short cover letter per application.
@@ -209,6 +211,20 @@ shows the closest technical matches with a note explaining why each is
 borderline, instead of padding the list. `present` never re-scores, never invents
 resume content and never submits.
 
+Two more presentation-layer rules apply. A `[filter].stipend_floor` (default
+₹30,000/month) drops postings whose stipend is confirmed below the floor or is
+explicitly unpaid (including commission-only); a performance-conditioned
+stipend, or an `up to` cap at or above the floor, is treated as unknown, exactly
+like a posting whose stipend is simply *not stated*, and is kept but shown in a
+separate **"Stipend not stated — verify before applying"** section, never
+silently failed (an `up to` cap below the floor counts as a confirmed
+below-floor figure and is dropped). And `[filter].exclude_file` names a
+tracked TOML list of postings already applied to (default
+`data/applied-postings.toml`, set to `""` to disable); `present` drops them
+entirely (matched by url or stable id, so a re-discovery is excluded while a
+genuinely new same-company/same-title posting is not), without
+deleting anything from the store. Each card shows its stipend outcome.
+
 ### Tracking: outcomes, follow-ups and the skill-gap heatmap
 
 Once you apply, the tracker keeps working. On an auto-submission or a
@@ -251,10 +267,13 @@ Where a posting states an application deadline ("apply by", "applications
 close", "deadline"), it is extracted into an ISO date and stored. `jobpilot
 postings` and `jobpilot queue list` label a deadline as *closing soon* (within
 `[deadline].closing_soon_days`, default 7) or *expired*, and flag a posting
-published more than `[deadline].stale_days` ago. A deadline is **never a hard
-filter** and a missing one never changes a posting's status; a bare date or an
-ambiguous numeric date is never guessed as a deadline, and the internship's own
-start/end window is untouched.
+published more than `[deadline].stale_days` ago. A stated deadline that has
+passed **closes the posting**: the shared open-state check (`jobpilot/openstate`)
+rejects it, alongside a falsy Unstop `regn_open`, a past `end_date`, or explicit
+closed text ("application closed", "no longer accepting"). A missing deadline
+never changes a posting's status; a bare date or an ambiguous numeric date is
+never guessed as a deadline, and the internship's own start/end window is
+untouched.
 
 ---
 
@@ -421,7 +440,7 @@ facet would have excluded is still discovered and filtered.
 | **Ashby** | `api.ashbyhq.com/posting-api/job-board/{token}` | Undocumented; carries each job's typed `employmentType` for the shared filter; never drops on it. Only configured tokens. |
 | **Workable** (per-account) | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` | Public widget API; some boards return zero jobs; only configured tokens. Carries each row's typed `employment_type` for the shared filter; never drops on it. |
 | **Himalayas** | `himalayas.app/jobs/api/search?employment_type=Intern&country=India` plus a `q=intern` keyword pass | Free, no key. **Only the first page of each query is requested, and no `page` parameter is ever sent**, because the board's published policy disallows the paged path (`Disallow: /jobs*&page=`) and the enforced robots gate honours it per concrete URL. The typed `employment_type=Intern` slice is a high-precision path, not the only one: a `q=intern` keyword query is merged in and deduplicated by guid so a mis-tagged intern is still discovered. Terms require a visible link back to himalayas.app and the attribution "data sourced from Himalayas". India intern volume is modest and includes stale/volunteer entries. |
-| **Unstop** | `unstop.com/api/public/opportunity/search-result?opportunity=internships&page=N` plus one `searchTerm=<keyword>` pass per configured keyword | India-native live internship feed (~10,000 rows); its `robots.txt` explicitly allows `/api/public/*`. 10/page. The generic feed is recency-sorted and non-technical-dominated, so the API's server-side `searchTerm` keyword filter is run as a high-precision slice too; the generic feed and each keyword pass are merged and deduped by Unstop's own id. Typed `start_date`/`end_date` are mapped into the window check; a lone date is left as "unknown window" (review-only). |
+| **Unstop** | `unstop.com/api/public/opportunity/search-result?opportunity=internships&page=N` plus one `searchTerm=<keyword>` pass per configured keyword | India-native live internship feed (~10,000 rows); its `robots.txt` explicitly allows `/api/public/*`. 10/page. The generic feed is recency-sorted and non-technical-dominated, so the API's server-side `searchTerm` keyword filter is run as a high-precision slice too; the generic feed and each keyword pass are merged and deduped by Unstop's own id. Typed `start_date`/`end_date` are mapped into the window check; a lone date is left as "unknown window" (review-only). Rows also carry `regn_open` and `end_date`, which the shared open-state check uses to drop a posting whose application is actually closed even when its `status` still says `LIVE`. |
 | **Workable** (global search) | `jobs.workable.com/api/v1/jobs?query=intern&location=India` | **Undocumented** cross-company search; paginates with an opaque `pageToken`. `robots.txt` sets `ai-train=no` (data must not be used for model training). Its `employmentType` is unreliable, so it relies on Workable's own server-side `query=intern` search. |
 | **The Muse** | `themuse.com/api/public/jobs?page=N&level=Internship&location=India` plus a `location=India` pass without `level` | Free public API (500 req/hr unauthenticated); typed `level=Internship`. That typed slice is not the only path: the API ignores keyword parameters, so a broader `location=India` query without the level facet is merged in and deduplicated by id. The `location=India` parameter is loose, so the hard location filter rechecks every hit. |
 | **LinkedIn** (optional reader, disabled by default) | public guest job-search HTML, one pass per configured target query | **Against LinkedIn's Terms of Service; best-effort; may stop working at any time.** An off-by-default, captain-authorized exception: link-out is the default LinkedIn path. Runs a configurable list of target queries (`[linkedin].keywords`), pages each a few times, and merges/dedupes by job id, so it is not limited to one generic `intern` word. Never logs in, never authenticates, never applies, low rate, degrades gracefully. Never auto-submitted. |

@@ -23,7 +23,10 @@ from jobpilot.models import ApplicationPlan, GeneratedResume
 from jobpilot.store import Store
 from tests.helpers import FakeAdapter, posting, strong_match, test_config
 
-IN_WINDOW = "Machine learning internship, January 2026 - June 2026. Python, RAG."
+IN_WINDOW = (
+    "Machine learning internship, January 2026 - June 2026. Python, RAG. "
+    "Stipend: ₹40,000/month."
+)
 TODAY = date(2026, 3, 10)
 
 

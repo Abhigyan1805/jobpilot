@@ -207,6 +207,16 @@ class FilterConfig:
     allow_unknown_location: bool = False
     window_start_month: int = 1
     window_end_month: int = 6
+    #: Minimum monthly stipend (INR, monthly by design). A confirmed figure
+    #: at/above the floor is shown in the main list; a confirmed figure below it,
+    #: or an explicitly unpaid posting, is dropped; a posting whose stipend is
+    #: not stated is shown in a separate verify section.
+    stipend_floor: int = 30000
+    #: TOML file listing postings already applied to (see
+    #: ``jobpilot/exclusions.py``). Resolved relative to the config file. Entries
+    #: are filtered out of ``jobpilot present``; they are never deleted from the
+    #: store. Defaults to the shipped list; set it to an empty string to disable.
+    exclude_file: str = "data/applied-postings.toml"
 
 
 @dataclass
@@ -389,7 +399,7 @@ class RobotsConfig:
 
 @dataclass
 class DeadlineConfig:
-    """How a posting deadline is surfaced (never used as a hard filter)."""
+    """How a posting deadline is surfaced and used to close a posting."""
 
     #: A deadline this many days away or fewer is "closing soon".
     closing_soon_days: int = 7

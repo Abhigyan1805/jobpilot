@@ -555,6 +555,71 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("Auto-apply eligible", html)
         self.assertIn("unconfirmed", html)
 
+    def test_confirmed_stipend_is_shown_in_the_main_section(self):
+        confirmed = candidate(
+            posting(
+                job_id="paid-1",
+                title="Machine Learning Intern",
+                description=f"{ML_JD} Stipend: ₹40,000/month.",
+            ),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+        )
+        selection = select_matches([confirmed], self.matcher, self.cfg)
+        self.assertEqual(len(selection.included), 1)
+        self.assertEqual(selection.included[0].stipend.state, "confirmed_ge_floor")
+        self.assertEqual(selection.unstated, [])
+
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("₹40,000/mo confirmed", html)
+        self.assertIn("Confirmed stipend", html)
+        self.assertNotIn("Stipend not stated — verify before applying", html)
+
+    def test_unstated_stipend_is_shown_in_a_separate_section(self):
+        unstated = candidate(
+            posting(job_id="unstated-1", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+        )
+        selection = select_matches([unstated], self.matcher, self.cfg)
+        self.assertEqual(len(selection.included), 1)
+        self.assertEqual(len(selection.unstated), 1)
+
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Stipend not stated — verify before applying", html)
+        self.assertIn("stipend not stated", html)
+        self.assertIn('class="card unstated"', html)
+
+    def test_below_floor_and_unpaid_postings_are_dropped(self):
+        below = candidate(
+            posting(
+                job_id="below-1",
+                title="Machine Learning Intern",
+                description=f"{ML_JD} Stipend: ₹10,000/month.",
+            ),
+            matched=["Python"],
+        )
+        unpaid = candidate(
+            posting(
+                job_id="unpaid-1",
+                title="Machine Learning Intern",
+                description=f"{ML_JD} Stipend: Unpaid.",
+            ),
+            matched=["Python"],
+        )
+        selection = select_matches([below, unpaid], self.matcher, self.cfg)
+        self.assertEqual(selection.included, [])
+        self.assertEqual(len(selection.excluded), 2)
+        reasons = " ".join(e.reason for e in selection.excluded)
+        self.assertIn("below floor", reasons)
+        self.assertIn("unpaid", reasons)
+
     def test_run_present_reads_the_store_and_writes_the_page(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))
         try:
