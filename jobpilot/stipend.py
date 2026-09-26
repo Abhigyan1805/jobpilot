@@ -106,8 +106,10 @@ _DURATION_AFTER_RE = re.compile(
 #: non-monthly rate is never silently treated as a floor-clearing monthly amount.
 _AFTER_PERIOD_RE = re.compile(
     r"\s*(?:/-)?\s*(?:"
-    r"(?:(?:per[-\s]+|/\s*|a\s+|an\s+)(?P<unit>months?|years?|annum|weeks?|days?|hours?|hrs?|wk|wks))\b"
-    r"|(?P<word>monthly|yearly|annually|annual|hourly|daily|weekly|fortnightly)\b"
+    r"(?:(?:per[-\s]+|/\s*|a\s+|an\s+)(?P<unit>months?|years?|annum|weeks?|days?"
+    r"|hours?|hrs?|wk|wks|quarters?|fortnights?|bi[-\s]?weeks?))\b"
+    r"|(?P<word>monthly|yearly|annually|annual|hourly|daily|weekly|fortnightly"
+    r"|quarterly|biweekly|bi-weekly)\b"
     r"|(?P<pa>p\.?\s*a\.?)(?![a-z])"
     r")",
     re.IGNORECASE,
@@ -170,24 +172,70 @@ _FOREIGN_CODES = frozenset(
 #: code in the next sentence.
 _FOREIGN_WRAP = " \t\r\n()[]{}\"'"
 
+#: Separators that may sit between a figure and the currency code/symbol quoted
+#: with it (``40,000/month, USD``, ``40,000 - USD``, ``40,000/month/USD``).
+#: Sentence punctuation is deliberately absent: a code in the next sentence is a
+#: different figure's currency.
+_FOREIGN_SEPARATORS = " \t\r\n/\\|,;:–—-()[]{}\"'~≈"
+
+#: A bounded connector/preposition run that may sit between a figure's period
+#: and the currency it is quoted in (``per month (in USD)``,
+#: ``per month in US dollars``, ``per month (approx USD)``).
+_FOREIGN_CONNECTORS = frozenset(
+    {"in", "us", "approx", "approximately", "about", "around"}
+)
+
+#: A sentence terminator ends a figure's own sentence: a currency quoted in the
+#: following sentence is not this figure's currency.
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?]\s|\n")
+
+
+def _foreign_currency_before(text: str, start: int) -> bool:
+    """True when a foreign symbol/code in the figure's sentence precedes it."""
+    window = text[:start]
+    boundary = None
+    for boundary in _SENTENCE_BOUNDARY_RE.finditer(window):
+        pass
+    if boundary is not None:
+        window = window[boundary.end():]
+    window = window.rstrip(_FOREIGN_WRAP + ":,;")
+    if window and window[-1] in _FOREIGN_SYMBOLS:
+        return True
+    return any(
+        word.casefold() in _FOREIGN_CODES for word in re.findall(r"[A-Za-z]+", window)
+    )
+
+
+def _foreign_currency_after(after: str) -> bool:
+    """True when a foreign symbol/code (past separators/connectors) follows the figure."""
+    rest = after
+    while rest:
+        separator = re.match(rf"[{re.escape(_FOREIGN_SEPARATORS)}]+", rest)
+        if separator is not None:
+            rest = rest[separator.end():]
+            continue
+        connector = re.match(r"([A-Za-z]+)", rest)
+        if connector is not None and connector.group(1).casefold() in _FOREIGN_CONNECTORS:
+            rest = rest[connector.end():]
+            continue
+        break
+    if not rest:
+        return False
+    if rest[0] in _FOREIGN_SYMBOLS:
+        return True
+    code = re.match(r"([A-Za-z]+)", rest)
+    return code is not None and code.group(1).casefold() in _FOREIGN_CODES
+
 
 def _foreign_currency_adjacent(text: str, start: int, end: int) -> bool:
     """True when the amount spanning ``[start, end)`` is quoted in a foreign currency."""
-    before = text[:start].rstrip(_FOREIGN_WRAP + ":,;")
-    if before and before[-1] in _FOREIGN_SYMBOLS:
-        return True
-    word = re.search(r"([A-Za-z]+)$", before)
-    if word is not None and word.group(1).casefold() in _FOREIGN_CODES:
+    if _foreign_currency_before(text, start):
         return True
     after = text[end:]
     period = _AFTER_PERIOD_RE.match(after)
     if period is not None:
         after = after[period.end():]
-    after = after.lstrip(_FOREIGN_WRAP)
-    if after[:1] in _FOREIGN_SYMBOLS:
-        return True
-    code = re.match(r"([A-Za-z]+)", after)
-    return code is not None and code.group(1).casefold() in _FOREIGN_CODES
+    return _foreign_currency_after(after)
 
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(

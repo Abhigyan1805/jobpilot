@@ -159,6 +159,20 @@ class ParseFormsTests(unittest.TestCase):
         self.assertFalse(weekly.dropped)
         self.assertNotEqual(weekly.state, CONFIRMED_GE_FLOOR)
 
+    def test_quarterly_fortnightly_and_biweekly_periods_are_not_monthly(self):
+        # A quarterly/fortnightly/biweekly rate is not a monthly amount, so it
+        # is never judged against the monthly floor.
+        for text in (
+            "Stipend: ₹30,000 per quarter",
+            "Stipend: ₹30,000 quarterly",
+            "Stipend: ₹30,000 per fortnight",
+            "Stipend: ₹30,000/fortnight",
+            "Stipend: ₹30,000 biweekly",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+
     def test_bare_year_with_trailing_comma_is_not_a_stipend(self):
         for text in (
             "Founded in 2015, our interns get a stipend.",
@@ -219,6 +233,25 @@ class ParseFormsTests(unittest.TestCase):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
             self.assertEqual(info.amount, 35000, text)
+
+    def test_foreign_code_separated_by_slash_comma_dash_or_connector_is_foreign(self):
+        # A USD/EUR code separated from the figure by a slash, comma, dash or a
+        # short connector run is still that figure's currency: it must never be
+        # counted as rupees and must never confirm the floor. The genuine rupee
+        # stipend in each posting governs instead.
+        for text in (
+            "Stipend: 40,000 per month/USD. The monthly salary is ₹10,000.",
+            "Stipend: 40,000/month (in USD). The monthly salary is ₹10,000.",
+            "Stipend: 40,000 per month, USD. The monthly salary is ₹10,000.",
+            "Stipend: 40,000 per month - USD. The monthly salary is ₹10,000.",
+            "Stipend: 40,000 per month in US dollars. The monthly salary is ₹10,000.",
+            "Stipend: 40,000 per month (approx USD). The monthly salary is ₹10,000.",
+            "Stipend: 40,000 per month in EUR. The monthly salary is ₹10,000.",
+            "Stipend: USD-denominated 40,000 per month. The monthly salary is ₹10,000.",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR, text)
+            self.assertEqual(info.amount, 10000, text)
 
     def test_amount_without_an_inr_marker_is_unstated(self):
         # An INR marker is required to confirm a monthly amount. A bare figure
