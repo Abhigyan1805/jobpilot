@@ -199,6 +199,26 @@ class ParseFormsTests(unittest.TestCase):
         info = classify_stipend("Stipend: ₹35,000/month. Bonus $5,000.")
         self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(info.amount, 35000)
+        # A foreign word that is not a currency code in the next sentence does
+        # not mark the rupee figure foreign.
+        info = classify_stipend("Stipend: ₹35,000/month. USD roles only.")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(info.amount, 35000)
+
+    def test_foreign_currency_code_separated_by_period_or_wrapping(self):
+        # A foreign code attached to the figure past its period word or wrapping
+        # punctuation is still foreign, even when the posting also quotes rupees:
+        # the foreign amount must never confirm the floor.
+        for text in (
+            "Stipend: 40,000 per month (USD). Salary: ₹35,000/month.",
+            "Stipend: 40,000/month USD. Salary: ₹35,000/month.",
+            "Salary (USD): 40,000 per month. Stipend: ₹35,000/month.",
+            "(USD) 40,000 per month. Stipend: ₹35,000/month.",
+            "Salary: ₹35,000/month. Stipend: 40,000 per annum (USD).",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, 35000, text)
 
     def test_amount_without_an_inr_marker_is_unstated(self):
         # An INR marker is required to confirm a monthly amount. A bare figure

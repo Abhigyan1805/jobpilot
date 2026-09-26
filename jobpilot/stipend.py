@@ -164,15 +164,26 @@ _FOREIGN_CODES = frozenset(
 )
 
 
+#: Wrapping punctuation/space that may sit between a figure and the currency it
+#: is quoted in (``40,000 (USD)``, ``(USD) 40,000``). Period words and sentence
+#: punctuation are handled separately so a figure is never marked foreign by a
+#: code in the next sentence.
+_FOREIGN_WRAP = " \t\r\n()[]{}\"'"
+
+
 def _foreign_currency_adjacent(text: str, start: int, end: int) -> bool:
     """True when the amount spanning ``[start, end)`` is quoted in a foreign currency."""
-    before = text[:start].rstrip()
+    before = text[:start].rstrip(_FOREIGN_WRAP + ":,;")
     if before and before[-1] in _FOREIGN_SYMBOLS:
         return True
-    word = re.search(r"([A-Za-z]+)\s*$", before)
+    word = re.search(r"([A-Za-z]+)$", before)
     if word is not None and word.group(1).casefold() in _FOREIGN_CODES:
         return True
-    after = text[end:].lstrip()
+    after = text[end:]
+    period = _AFTER_PERIOD_RE.match(after)
+    if period is not None:
+        after = after[period.end():]
+    after = after.lstrip(_FOREIGN_WRAP)
     if after[:1] in _FOREIGN_SYMBOLS:
         return True
     code = re.match(r"([A-Za-z]+)", after)
