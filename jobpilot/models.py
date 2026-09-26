@@ -20,12 +20,21 @@ class JobPosting:
     employment_type: str = ""
     published_at: str = ""
     #: Application deadline as an ISO ``YYYY-MM-DD`` date when the posting states
-    #: one; empty otherwise. Never guessed and never used as a hard filter.
+    #: one; empty otherwise. Never guessed; a *past* deadline closes the posting
+    #: through the shared open-state check.
     deadline: str = ""
     apply_url: str = ""
     apply_email: str = ""
     is_remote: bool | None = None
     salary: str = ""
+    #: Number of applicants a board reports (``registerCount`` on Unstop), or 0
+    #: when unknown. Shown as a warning on the review page; never a hard cutoff.
+    applicants: int = 0
+    #: Stipend classification (see ``jobpilot.stipend``): ``confirmed_ge_floor``,
+    #: ``confirmed_below_floor``, ``unpaid`` or ``unstated``, with the confirmed
+    #: monthly figure when there is one. Set by the hard filter.
+    stipend_state: str = ""
+    stipend_amount: int = 0
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property

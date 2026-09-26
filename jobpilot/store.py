@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS postings (
     deadline TEXT,
     description TEXT,
     is_remote INTEGER,
+    applicants INTEGER,
+    stipend_state TEXT,
+    stipend_amount INTEGER,
     eligible INTEGER,
     window_label TEXT,
     window_confidence REAL,
@@ -206,6 +209,12 @@ class Store:
             self.conn.execute("ALTER TABLE postings ADD COLUMN apply_email TEXT")
         if "deadline" not in posting_cols:
             self.conn.execute("ALTER TABLE postings ADD COLUMN deadline TEXT")
+        if "applicants" not in posting_cols:
+            self.conn.execute("ALTER TABLE postings ADD COLUMN applicants INTEGER")
+        if "stipend_state" not in posting_cols:
+            self.conn.execute("ALTER TABLE postings ADD COLUMN stipend_state TEXT")
+        if "stipend_amount" not in posting_cols:
+            self.conn.execute("ALTER TABLE postings ADD COLUMN stipend_amount INTEGER")
 
     def close(self) -> None:
         self.conn.close()
@@ -227,9 +236,10 @@ class Store:
             """
             INSERT INTO postings (
                 stable_id, source, job_id, company, title, url, apply_url, apply_email,
-                location, employment_type, published_at, deadline, description, is_remote, eligible,
+                location, employment_type, published_at, deadline, description, is_remote,
+                applicants, stipend_state, stipend_amount, eligible,
                 window_label, window_confidence, reject_reasons, seen_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(stable_id) DO UPDATE SET
                 company=excluded.company,
                 title=excluded.title,
@@ -242,6 +252,9 @@ class Store:
                 deadline=COALESCE(excluded.deadline, postings.deadline),
                 description=excluded.description,
                 is_remote=excluded.is_remote,
+                applicants=excluded.applicants,
+                stipend_state=excluded.stipend_state,
+                stipend_amount=excluded.stipend_amount,
                 eligible=COALESCE(excluded.eligible, postings.eligible),
                 window_label=excluded.window_label,
                 window_confidence=excluded.window_confidence,
@@ -263,6 +276,9 @@ class Store:
                 posting.deadline or None,
                 posting.description,
                 None if posting.is_remote is None else int(posting.is_remote),
+                int(posting.applicants or 0),
+                posting.stipend_state or None,
+                int(posting.stipend_amount or 0),
                 None if eligible is None else int(eligible),
                 window_label,
                 window_confidence,

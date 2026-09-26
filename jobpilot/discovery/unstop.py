@@ -177,8 +177,22 @@ class UnstopAdapter(SourceAdapter):
             employment_type=employment_type,
             published_at=str(row.get("approved_date") or row.get("updated_at") or ""),
             is_remote=("online" in region.lower() or "remote" in region.lower()) or None,
+            applicants=self._applicants(row),
             raw=row,
         )
+
+    @staticmethod
+    def _applicants(row: dict) -> int:
+        """The board's own applicant count (``registerCount``), 0 when absent.
+
+        Captured only so the review page can warn ("N applicants"); it is never
+        used as a hard cutoff, because a posting can close on applicant volume
+        without that count being a rule the candidate can rely on.
+        """
+        try:
+            return max(0, int(row.get("registerCount")))
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _location(region: str, locations) -> str:

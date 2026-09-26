@@ -558,7 +558,8 @@ def _extract_deadline(posting: JobPosting) -> None:
 
     An adapter-supplied deadline is never overwritten, and a posting with no
     stated deadline keeps none (absence is not a correction). The deadline is
-    stored, never used as a hard filter.
+    stored and surfaced; a *past* deadline is rejected by the shared open-state
+    check (``jobpilot/openstate.py``), never by this function.
     """
     if not posting.deadline:
         posting.deadline = extract_deadline(posting)
@@ -581,6 +582,9 @@ def _postings_from_store(store: Store) -> list[JobPosting]:
             published_at=row["published_at"] or "",
             deadline=row["deadline"] or "",
             is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
+            applicants=int(row["applicants"] or 0),
+            stipend_state=row["stipend_state"] or "",
+            stipend_amount=int(row["stipend_amount"] or 0),
         )
         for row in rows
     ]

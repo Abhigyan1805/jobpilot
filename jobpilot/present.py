@@ -33,11 +33,13 @@ from pathlib import Path
 from typing import Any
 
 from jobpilot.config import Config
+from jobpilot.exclusions import ExclusionList
 from jobpilot.linkout import is_manual_source
 from jobpilot.matching import Matcher
 from jobpilot.models import JobPosting
 from jobpilot.profile import load_profile
 from jobpilot.review import safe_filename
+from jobpilot.stipend import DROPPED_STATES, UNSTATED, StipendInfo, classify_stipend
 from jobpilot.store import TRANSIENT_REVIEW_REASONS, Store
 
 
@@ -62,6 +64,9 @@ class ReviewCandidate:
     page_count: int = 0
     page_limit: int = 0
     parseability_ok: bool | None = None
+    applicants: int = 0
+    #: Stipend classification (see ``jobpilot.stipend``), set by the selection.
+    stipend: StipendInfo = field(default_factory=StipendInfo)
 
     @property
     def company(self) -> str:
@@ -95,6 +100,7 @@ class PresentMatch:
     route: str = "review"
     route_label: str = "Review-only"
     safety_detail: str = ""
+    stipend: StipendInfo = field(default_factory=StipendInfo)
 
 
 @dataclass
@@ -113,6 +119,11 @@ class SelectionResult:
     def total(self) -> int:
         return len(self.included) + len(self.borderline)
 
+    @property
+    def unstated(self) -> list[PresentMatch]:
+        """Included matches whose stipend is not stated (shown separately)."""
+        return [m for m in self.included if m.stipend.state == UNSTATED]
+
 
 def _posting_from_row(row) -> JobPosting:
     return JobPosting(
@@ -128,6 +139,9 @@ def _posting_from_row(row) -> JobPosting:
         employment_type=row["employment_type"] or "",
         published_at=row["published_at"] or "",
         is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
+        applicants=(int(row["applicants"] or 0) if "applicants" in row.keys() else 0),
+        stipend_state=(row["stipend_state"] or "" if "stipend_state" in row.keys() else ""),
+        stipend_amount=(int(row["stipend_amount"] or 0) if "stipend_amount" in row.keys() else 0),
     )
 
 
@@ -172,6 +186,9 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
                 page_count=int(row["resume_pages"] or 0),
                 page_limit=int(row["resume_page_limit"] or 0),
                 parseability_ok=parseability_ok,
+                applicants=(
+                    posting_row["applicants"] or 0 if "applicants" in posting_row.keys() else 0
+                ),
             )
         )
     return candidates
@@ -261,6 +278,18 @@ def _classify_route(candidate: ReviewCandidate, config: Config) -> tuple[str, st
     )
 
 
+def _exclusions_for(config: Config) -> ExclusionList:
+    """Load the configured already-applied list; an unset path means none."""
+    path = (config.filter.exclude_file or "").strip()
+    if not path:
+        return ExclusionList()
+    return ExclusionList.load(config.resolve(path))
+
+
+def _stipend_text(posting: JobPosting) -> str:
+    return " ".join(p for p in [posting.description, posting.salary] if p)
+
+
 def select_matches(
     candidates: list[ReviewCandidate], matcher: Matcher, config: Config
 ) -> SelectionResult:
@@ -270,12 +299,35 @@ def select_matches(
     domain reaches ``present.min_role_relevance`` and its title is not a
     non-technical role. Candidates between ``borderline_role_relevance`` and the
     floor are held as borderline and shown only when nothing clears the floor.
+
+    Two stipend-aware rules run first: postings on the configured already-applied
+    exclusion list are dropped outright, and postings whose stipend is confirmed
+    below the floor or explicitly unpaid are dropped. A posting whose stipend is
+    merely ``unstated`` is kept - the renderer shows it in a separate section.
     """
     present = config.present
     result = SelectionResult()
     borderline: list[PresentMatch] = []
+    exclusions = _exclusions_for(config)
 
     for candidate in candidates:
+        entry = exclusions.match(candidate.posting)
+        if entry is not None:
+            result.excluded.append(
+                ExcludedCandidate(candidate, f"already applied (exclusion list: {entry.label()})")
+            )
+            continue
+
+        stipend = classify_stipend(
+            _stipend_text(candidate.posting),
+            floor=int(config.filter.stipend_floor),
+            currency=str(config.filter.stipend_currency),
+        )
+        candidate.stipend = stipend
+        if stipend.state in DROPPED_STATES:
+            result.excluded.append(ExcludedCandidate(candidate, stipend.display_label()))
+            continue
+
         excluded_term = title_is_excluded(candidate.title, present.exclude_terms)
         domain_scores = matcher.role_relevance_by_domain(candidate.posting)
         technical, best_domain, core_hit = _technical_relevance(
@@ -299,6 +351,7 @@ def select_matches(
             route=route,
             route_label=label,
             safety_detail=detail,
+            stipend=stipend,
         )
 
         if technical >= present.min_role_relevance:
@@ -366,6 +419,13 @@ h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
   box-shadow: 0 1px 2px rgba(20, 24, 33, 0.04);
 }
 .card.borderline { border-style: dashed; }
+.card.unstated { border-left: 4px solid var(--warn); }
+.section-unstated {
+  background: var(--warn-bg); border: 1px solid #f0d9b0; border-radius: 10px;
+  padding: 12px 14px; margin: 30px 0 14px;
+}
+.section-unstated h2 { font-size: 15px; margin: 0 0 4px; color: var(--warn); }
+.section-unstated p { margin: 0; font-size: 13px; color: var(--warn); }
 .card-head { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
 .rank { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; padding-top: 4px; }
 .role { flex: 1 1 320px; min-width: 0; }
@@ -560,11 +620,25 @@ def _copy_asset(src: str, dest: Path) -> str:
     return dest.name
 
 
+def _applicants_span(candidate: ReviewCandidate) -> str:
+    """A visible applicant-count warning; captained from the board, never a cutoff."""
+    if candidate.applicants <= 0:
+        return ""
+    return f'<span><b>Applicants:</b> {candidate.applicants} (may close early)</span>'
+
+
 def _render_card(
-    match: PresentMatch, rank: int, assets_rel: str, slug: str, resume_name: str, cover_name: str
+    match: PresentMatch,
+    rank: int,
+    assets_rel: str,
+    slug: str,
+    resume_name: str,
+    cover_name: str,
+    *,
+    unstated: bool = False,
 ) -> str:
     c = match.candidate
-    css = "card borderline" if match.borderline else "card"
+    css = "card unstated" if unstated else "card borderline" if match.borderline else "card"
     domains = ", ".join(f"{name}={score:.2f}" for name, score in match.domain_scores.items())
     resume_rel = f"{assets_rel}/{slug}/resume.pdf" if resume_name else ""
     cover_rel = f"{assets_rel}/{slug}/cover_letter.pdf" if cover_name else ""
@@ -619,6 +693,8 @@ def _render_card(
         <span><b>Window:</b> {_esc(_window_evidence(c))}</span>
         <span><b>Source:</b> {_esc(c.posting.source)}</span>
         <span><b>Technical relevance:</b> {match.technical_relevance:.2f}{_esc(f" ({match.best_domain})" if match.best_domain else "")}</span>
+        <span><b>Stipend:</b> {_esc(match.stipend.display_label())}</span>
+        {_applicants_span(c)}
       </div>
       <div class="chips"><span class="chip">{_esc(domains or "no target domains")}</span></div>
       {_badge_row(c)}
@@ -656,9 +732,17 @@ def _pdf_block(label: str, rel: str) -> str:
     )
 
 
-def _render_document(selection: SelectionResult, config: Config, cards: list[str], generated_at: str) -> str:
+def _render_document(
+    selection: SelectionResult,
+    config: Config,
+    cards_main: list[str],
+    cards_unstated: list[str],
+    generated_at: str,
+) -> str:
     matched = len(selection.included)
     borderline = len(selection.borderline)
+    unstated_count = sum(1 for m in selection.included if m.stipend.state == UNSTATED)
+    floor = int(config.filter.stipend_floor)
     parse_failures = _failed_parseability(_presented_matches(selection))
     if parse_failures:
         count = len(parse_failures)
@@ -674,7 +758,8 @@ def _render_document(selection: SelectionResult, config: Config, cards: list[str
             )
     else:
         parse_warning = ""
-    if not cards:
+
+    if not cards_main and not cards_unstated:
         body = (
             '<div class="empty"><h2>No technical matches to show</h2>'
             "<p>Nothing in the review queue cleared the technical role-relevance floor "
@@ -682,23 +767,34 @@ def _render_document(selection: SelectionResult, config: Config, cards: list[str
             "close enough to show. The queue is not empty by mistake - these roles simply "
             "did not fit an AI/ML or technical profile.</p>"
             f"<p>{_esc(len(selection.excluded))} queued postings were excluded as "
-            "non-technical or below the floor.</p></div>"
+            "already applied, non-technical, below the stipend floor or below the role floor.</p></div>"
         )
     else:
-        heading = ""
+        chunks: list[str] = []
         if not selection.included and selection.borderline:
-            heading = (
+            chunks.append(
                 '<div class="note" style="margin-bottom:16px">Nothing cleared the '
                 f"{config.present.min_role_relevance:.2f} technical floor. The closest "
                 "technical matches are shown below, each with a note explaining why it is "
                 "borderline.</div>"
             )
-        section = (
-            '<div class="section-title">Closest technical matches (borderline)</div>'
-            if not selection.included
-            else ""
-        )
-        body = heading + section + "".join(cards)
+        if cards_main:
+            title = (
+                f"Confirmed stipend &ge; ₹{floor:,}/month"
+                if selection.included
+                else "Closest technical matches (borderline)"
+            )
+            chunks.append(f'<div class="section-title">{title}</div>')
+            chunks.append("".join(cards_main))
+        if cards_unstated:
+            chunks.append(
+                '<div class="section-unstated">'
+                "<h2>Stipend not stated — verify before applying</h2>"
+                f"<p>These roles cleared the technical floor but the posting states no monthly "
+                f"stipend. Confirm the amount is at least ₹{floor:,}/month before applying.</p></div>"
+            )
+            chunks.append("".join(cards_unstated))
+        body = "".join(chunks)
 
     domains = ", ".join(config.present.technical_domains)
     return f"""<!doctype html>
@@ -719,6 +815,7 @@ def _render_document(selection: SelectionResult, config: Config, cards: list[str
   <div class="stats">
     <div class="stat"><b>{matched}</b><span>matches</span></div>
     <div class="stat"><b>{borderline}</b><span>borderline</span></div>
+    <div class="stat"><b>{unstated_count}</b><span>stipend not stated</span></div>
     <div class="stat"><b>{len(selection.excluded)}</b><span>excluded</span></div>
     <div class="stat"><b>0</b><span>submitted</span></div>
   </div>
@@ -783,14 +880,26 @@ def render_page(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     generated_at = generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    cards: list[str] = []
+    confirmed = [m for m in selection.included if m.stipend.state != UNSTATED]
+    unstated = [m for m in selection.included if m.stipend.state == UNSTATED]
+
     rank = 0
-    for match in [*selection.included, *selection.borderline]:
+
+    def card(match: PresentMatch, *, unstated: bool = False) -> str:
+        nonlocal rank
         rank += 1
         slug = _asset_slug(match.candidate)
         resume_name = _copy_asset(match.candidate.resume_pdf, out / "assets" / slug / "resume.pdf")
         cover_name = _copy_asset(match.candidate.cover_pdf, out / "assets" / slug / "cover_letter.pdf")
-        cards.append(_render_card(match, rank, "assets", slug, resume_name, cover_name))
+        return _render_card(
+            match, rank, "assets", slug, resume_name, cover_name, unstated=unstated
+        )
+
+    cards_main = [card(m) for m in [*confirmed, *selection.borderline]]
+    cards_unstated = [card(m, unstated=True) for m in unstated]
     index = out / "index.html"
-    index.write_text(_render_document(selection, config, cards, generated_at), encoding="utf-8")
+    index.write_text(
+        _render_document(selection, config, cards_main, cards_unstated, generated_at),
+        encoding="utf-8",
+    )
     return index

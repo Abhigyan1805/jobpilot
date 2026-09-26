@@ -1,0 +1,273 @@
+# Postings already applied to from the 2026-09-25 review page.
+# Consumed by `jobpilot present` via [filter].exclude_file (never deleted from the store).
+# Matched case-insensitively on company+title and on url, so a re-discovery is also excluded.
+
+[[applied]]
+source = "greenhouse"
+company = "Rubrik Job Board"
+title = "Software Engineer - Winter Intern"
+url = "https://www.rubrik.com/company/careers/departments/job.8166523?gh_jid=8166523"
+
+[[applied]]
+source = "greenhouse"
+company = "Rubrik Job Board"
+title = "Software Engineer (CPD) - Winter Intern"
+url = "https://www.rubrik.com/company/careers/departments/job.8166537?gh_jid=8166537"
+
+[[applied]]
+source = "unstop"
+company = "PrepLinc AI"
+title = "AI/ML Application Developer Internship"
+url = "https://unstop.com/internships/aiml-application-developer-internship-preplinc-ai-1760453"
+
+[[applied]]
+source = "unstop"
+company = "Pariskq"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-internship-pariskq-1729187"
+
+[[applied]]
+source = "unstop"
+company = "PrepLinc AI"
+title = "Data Science & Artificial Intelligence Internship"
+url = "https://unstop.com/internships/data-science-artificial-intelligence-internship-preplinc-ai-1760823"
+
+[[applied]]
+source = "unstop"
+company = "Vortizo AI"
+title = "Data Science Internship"
+url = "https://unstop.com/internships/data-science-internship-vortizo-ai-1752060"
+
+[[applied]]
+source = "greenhouse"
+company = "Stripe"
+title = "Software Engineer, Intern"
+url = "https://stripe.com/jobs/search?gh_jid=8031833"
+
+[[applied]]
+source = "themuse"
+company = "Labcorp"
+title = "Data Science Intern - Real World Data Strategy Team"
+url = "https://www.themuse.com/jobs/labcorp/data-science-intern-real-world-data-strategy-team-fa4bac"
+
+[[applied]]
+source = "unstop"
+company = "Zenotalent"
+title = "Data Science Internship"
+url = "https://unstop.com/internships/data-science-internship-zenotalent-1755823"
+
+[[applied]]
+source = "unstop"
+company = "godstockss"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-internship-godstockss-1731267"
+
+[[applied]]
+source = "unstop"
+company = "Learntricks Edutech"
+title = "Machine Learning Internship"
+url = "https://unstop.com/internships/machine-learning-internship-unstop-tech-fair-2025-learntricks-edutech-1724312"
+
+[[applied]]
+source = "unstop"
+company = "TalentCV"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-intern-talentcv-1694821"
+
+[[applied]]
+source = "unstop"
+company = "Learn Depth"
+title = "Machine Learning Trainer Internship"
+url = "https://unstop.com/internships/machine-learning-trainer-internship-learn-depth-1735074"
+
+[[applied]]
+source = "unstop"
+company = "Maytrixtech"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-internship-maytrixtech-1733361"
+
+[[applied]]
+source = "unstop"
+company = "Skillorbit Private Limited"
+title = "Machine Learning Internship"
+url = "https://unstop.com/internships/machine-learning-intern-skillorbit-private-limited-1759582"
+
+[[applied]]
+source = "unstop"
+company = "Skillorbit Private Limited"
+title = "Machine Learning Engineer Internship"
+url = "https://unstop.com/internships/machine-learning-engineer-internship-skillorbit-private-limited-1752362"
+
+[[applied]]
+source = "unstop"
+company = "Operonn"
+title = "AI Engineer Internship"
+url = "https://unstop.com/internships/ai-engineer-internship-operonn-1755613"
+
+[[applied]]
+source = "unstop"
+company = "BluMotiv"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-internship-blumotiv-1668628"
+
+[[applied]]
+source = "himalayas"
+company = "Ritual"
+title = "Research Intern"
+url = "https://himalayas.app/companies/ritual-net/jobs/research-intern-1464631102"
+
+[[applied]]
+source = "unstop"
+company = "Vision AI Learning"
+title = "Curriculum Developer – Artificial Intelligence Internship"
+url = "https://unstop.com/internships/curriculum-developer-artificial-intelligence-internship-vision-ai-learning-1759335"
+
+[[applied]]
+source = "themuse"
+company = "The Muse"
+title = "AI Engineer – Remote Internship"
+url = "https://www.themuse.com/jobs/themuse/ai-engineer-remote-internship"
+
+[[applied]]
+source = "unstop"
+company = "Skillorbit Private Limited"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-skillorbit-private-limited-1758984"
+
+[[applied]]
+source = "unstop"
+company = "Embolo Technologies Private Limited"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-internship-embolo-technologies-private-limited-1727893"
+
+[[applied]]
+source = "unstop"
+company = "JobLuxe"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-intern-jobluxe-1750680"
+
+[[applied]]
+source = "unstop"
+company = "Skill Orbit"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-skill-orbit-1756034"
+
+[[applied]]
+source = "themuse"
+company = "The Muse"
+title = "Data Engineer – Remote Internship"
+url = "https://www.themuse.com/jobs/themuse/data-engineer-remote-internship"
+
+[[applied]]
+source = "unstop"
+company = "Xtragrad Technologie Private Limited"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-xtragrad-technologie-private-limited-1754902"
+
+[[applied]]
+source = "unstop"
+company = "Xtragrad Technologie Private Limited"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-xtragrad-technologie-private-limited-1747534"
+
+[[applied]]
+source = "unstop"
+company = "Zenotalent"
+title = "Data Science Internship"
+url = "https://unstop.com/internships/data-science-internship-zenotalent-1748389"
+
+[[applied]]
+source = "themuse"
+company = "Atlassian"
+title = "Research Intern, 2026 Summer U.S."
+url = "https://www.themuse.com/jobs/atlassian/research-intern-2026-summer-us"
+
+[[applied]]
+source = "unstop"
+company = "Kukbit SL"
+title = "Machine Learning Internship"
+url = "https://unstop.com/internships/machine-learning-internship-kukbit-sl-1751307"
+
+[[applied]]
+source = "unstop"
+company = "Skillorbit Academy"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-intern-skillorbit-academy-1750189"
+
+[[applied]]
+source = "unstop"
+company = "Kukbit SL"
+title = "Data Science Internship"
+url = "https://unstop.com/internships/data-science-internship-kukbit-sl-1761158"
+
+[[applied]]
+source = "unstop"
+company = "Zenotalent"
+title = "Machine Learning Internship"
+url = "https://unstop.com/internships/machine-learning-internship-zenotalent-1749292"
+
+[[applied]]
+source = "unstop"
+company = "Vortizo AI"
+title = "Machine Learning Internship"
+url = "https://unstop.com/internships/machine-learning-internship-vortizo-ai-1744336"
+
+[[applied]]
+source = "unstop"
+company = "Aalteon"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-aalteon-1758771"
+
+[[applied]]
+source = "unstop"
+company = "IntelleQAcademy"
+title = "Data Science and ML Internship"
+url = "https://unstop.com/internships/data-science-and-ml-internship-intelleqacademy-1751493"
+
+[[applied]]
+source = "unstop"
+company = "Aalteon"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-aalteon-1742163"
+
+[[applied]]
+source = "unstop"
+company = "Zenotalent"
+title = "Data Science Internship"
+url = "https://unstop.com/internships/data-science-internship-zenotalent-1760539"
+
+[[applied]]
+source = "unstop"
+company = "Cornixe Edutech Pvt. Ltd."
+title = "Data Science & Machine Learning Internship"
+url = "https://unstop.com/internships/data-science-machine-learning-internship-cornixe-edutech-pvt-ltd-1761310"
+
+[[applied]]
+source = "workable_global"
+company = "Blue Machines AI"
+title = "Evaluation & Insights Intern, AI Delivery"
+url = "https://jobs.workable.com/view/hYkVydG3ua3RuasU6CTiMw/evaluation-%26-insights-intern%2C-ai-delivery-in-bengaluru-at-blue-machines-ai"
+
+[[applied]]
+source = "unstop"
+company = "Skillorbit Private Limited"
+title = "Artificial Intelligence Internship"
+url = "https://unstop.com/internships/artificial-intelligence-internship-skillorbit-private-limited-1748852"
+
+[[applied]]
+source = "unstop"
+company = "Skillorbit Private Limited"
+title = "Machine Learning Internship"
+url = "https://unstop.com/internships/machine-learning-internship-skillorbit-private-limited-1758836"
+
+[[applied]]
+source = "unstop"
+company = "Digital Back Office"
+title = "Software Engineer Internship"
+url = "https://unstop.com/internships/software-engineer-intern-digital-back-office-1756610"
+
+[[applied]]
+source = "unstop"
+company = "Qveto"
+title = "Data Science and Machine Learning Internship"
+url = "https://unstop.com/internships/data-science-and-machine-learning-internship-qveto-1747163"

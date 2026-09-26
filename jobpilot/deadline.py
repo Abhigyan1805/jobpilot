@@ -15,9 +15,10 @@ Two rules from the upstream study are honoured:
 * **Absence is not a correction.** A posting with no stated deadline keeps no
   deadline and its status is never changed by one.
 
-The deadline is deliberately *not* a hard filter: an expired posting is surfaced
-as expired but never dropped, and a deadline is never confused with the
-internship's own start/end window (which the structural window classifier owns).
+The deadline is never confused with the internship's own start/end window (which
+the structural window classifier owns). An *expired* deadline is surfaced as
+expired and also closes the posting through the shared open-state check in
+``jobpilot/openstate.py``; an absent deadline never changes a posting's status.
 """
 
 from __future__ import annotations

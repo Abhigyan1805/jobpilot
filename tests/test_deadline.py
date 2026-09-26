@@ -2,7 +2,8 @@
 
 The parser never guesses: only a date stated next to an application cue counts,
 a bare date or ambiguous numeric form yields nothing, and absence never changes
-a posting's status. The deadline is surfaced, never used as a hard filter.
+a posting's status. A *past* deadline closes the posting through the shared
+open-state check; the deadline parser itself never filters.
 """
 
 from __future__ import annotations

@@ -175,6 +175,9 @@ def cmd_present(args) -> int:
             f"no technical match cleared the floor; showing "
             f"{len(selection.borderline)} borderline match(es)"
         )
+    unstated = getattr(selection, "unstated", [])
+    if unstated:
+        print(f"stipend not stated (verify separately) for {len(unstated)} match(es)")
     print(f"excluded {len(selection.excluded)} non-technical / low-relevance queued posting(s)")
     print(f"review page: {index}")
     print("nothing was submitted.", file=sys.stderr)
