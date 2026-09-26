@@ -59,7 +59,7 @@ _YEAR_PERIOD = r"(?:per\s+(?:year|annum)|/\s*(?:year|annum)|yearly|annually)"
 # LPA / "lakhs per annum" is an annual figure whose number is counted in lakhs.
 _LPA_PERIOD = r"(?:lpa|lakhs?\s+(?:per\s+annum|p\.?a)|lakhs?\s*/\s*(?:year|annum))"
 
-_AMOUNT = r"(\d[\d,]*(?:\.\d+)?)\s*([kK])?"
+_AMOUNT = r"(\d[\d,]*(?:\.\d+)?)\s*([kK]\b|[lL](?:akhs?|acs?)?\b)?"
 
 _MONEY_PREFIX_RE = re.compile(rf"{_CURRENCY}\s*{_AMOUNT}", re.IGNORECASE)
 _MONEY_SUFFIX_RE = re.compile(rf"{_AMOUNT}\s*{_CURRENCY}(?![a-z])", re.IGNORECASE)
@@ -132,6 +132,11 @@ _RANGE_TAIL_RE = re.compile(
     rf"(?:(?:₹|rs\.?|inr|rupees?)\s*)?{_AMOUNT}",
     re.IGNORECASE,
 )
+
+#: A bare lakh unit after a number scales it to lakhs (×100000). Unlike the
+#: month-scale ``k`` shorthand a lakh figure with no stated period is the annual
+#: package, so it is divided by twelve.
+_LAKH_UNITS = frozenset({"l", "lac", "lacs", "lakh", "lakhs"})
 
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(
@@ -254,15 +259,17 @@ def _unstated() -> StipendInfo:
     return StipendInfo(state=UNSTATED)
 
 
-def _to_int(number: str, k_shorthand: str | None, multiplier: int = 1) -> int | None:
+def _unit_scale(unit: str | None) -> int:
+    """The multiplier for a recognised shorthand unit (``k`` / lakh)."""
+    return 1000 if unit and unit.casefold() == "k" else 100_000
+
+
+def _to_int(number: str, unit: str | None, multiplier: int = 1) -> int | None:
     try:
         value = float(number.replace(",", ""))
     except (TypeError, ValueError):
         return None
-    if k_shorthand:
-        value *= 1000
-    else:
-        value *= multiplier
+    value *= _unit_scale(unit) if unit else multiplier
     value = int(round(value))
     if value <= 0 or value > 10_000_000:
         return None
@@ -312,8 +319,14 @@ def _is_nonbase(text: str, start: int, end: int, clause_left: int, clause_right:
     # with no stated period in between. A cue in the clause never rescues an
     # adjacent extras noun, so "Travel stipend ₹2,000/month" is a travel amount,
     # not the stipend base. A benefit word that is merely elsewhere in the clause
-    # is detached and leaves the stipend as the base.
-    if _NONBASE_RE.search(text[clause_left:start]):
+    # is detached and leaves the stipend as the base. The preceding label stops
+    # at the previous figure, so an earlier amount's extras noun ("Travel
+    # allowance ₹2,000/month stipend ₹30,000/month") cannot poison the base.
+    prefix = text[clause_left:start]
+    label_start = 0
+    for digit in re.finditer(r"\d", prefix):
+        label_start = digit.end()
+    if _NONBASE_RE.search(prefix[label_start:]):
         return True
     if _period_after(text, end) is not None:
         return False
@@ -401,6 +414,10 @@ def _add(
     if not embedded_period and period is None and _PREPOSED_YEAR_RE.search(
         text[clause_left:start]
     ):
+        kind = "year"
+    # A lakh figure with no stated period ("₹4.8 Lakhs") is the annual package,
+    # not a monthly stipend; a stated month period keeps it monthly.
+    if not embedded_period and period is None and (shorthand or "").casefold() in _LAKH_UNITS:
         kind = "year"
     divisor = 1
     if lump_ok and period is None:

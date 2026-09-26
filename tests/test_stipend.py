@@ -177,6 +177,24 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(lpa.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(lpa.amount, 50000)
 
+    def test_bare_lakh_abbreviation_is_scaled_annually(self):
+        # "L"/"lac"/"Lakhs" is a lakh unit, not a stray leading digit: a figure
+        # stated per annum (or with no period) is annual, so ₹4.8L is ₹40,000/mo.
+        for text in (
+            "Stipend: ₹4.8L per annum",
+            "Stipend: 4.8L per year",
+            "Stipend: ₹4.8 lac per annum",
+            "Stipend: ₹4.8 Lakhs",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, 40000, text)
+
+    def test_lakh_figure_with_a_stated_month_stays_monthly(self):
+        info = classify_stipend("Stipend: ₹4.8 Lakhs per month")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(info.amount, 480000)
+
     def test_explicit_two_thousand_amount_is_not_dropped_as_a_year(self):
         for text in ("₹2000/month", "Stipend: 2000 per month"):
             info = classify_stipend(text)
@@ -351,6 +369,8 @@ class GoverningFigureTests(unittest.TestCase):
             "Internet stipend 1,000/month. Stipend: 30,000/month.",
             "Internet stipend: ₹1,000/month. Stipend: ₹30,000/month.",
             "Travel allowance ₹2,000/month. Stipend: ₹30,000/month.",
+            "Travel allowance ₹2,000/month stipend ₹30,000/month",
+            "Internet stipend 1,000/month stipend 30,000/month",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
