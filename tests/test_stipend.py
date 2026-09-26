@@ -341,6 +341,19 @@ class GoverningFigureTests(unittest.TestCase):
             self.assertEqual(info.state, state, text)
             self.assertEqual(info.amount, amount, text)
 
+    def test_cue_bearing_allowance_does_not_preempt_the_stipend_base(self):
+        # A small labelled extras amount ("travel/internet stipend") shares the
+        # strong stipend cue, so it must be read as an allowance, not the base,
+        # and never drag the real ₹30,000 stipend below the floor.
+        for text in (
+            "Travel stipend ₹2,000/month. Stipend: ₹30,000/month.",
+            "Internet stipend 1,000/month. Stipend: 30,000/month.",
+            "Travel allowance ₹2,000/month. Stipend: ₹30,000/month.",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, 30000, text)
+
     def test_display_shows_a_range_only_when_one_is_stated(self):
         single = classify_stipend("Stipend: ₹35,000/month; travel allowance 2,000/month")
         self.assertEqual(single.display_label(), "₹35,000/mo confirmed")

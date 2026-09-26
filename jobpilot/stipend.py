@@ -305,11 +305,28 @@ def _is_conditional(clause: str) -> bool:
     return bool(_CONDITIONAL_RE.search(clause))
 
 
-def _is_nonbase(clause: str) -> bool:
-    # A benefit/allowance word only governs the amount when no pay cue shares
-    # its clause: "travel allowance ₹2,000/month" is an allowance, but
-    # "Stipend: ₹30,000 per month for travel" is the stipend itself.
-    return bool(_NONBASE_RE.search(clause)) and not _CUE_RE.search(clause)
+#: Punctuation that ends the label directly attached to an amount, so a benefit
+#: word in a parenthetical or before a colon is not read as the amount's noun.
+_LABEL_BOUNDARY_RE = re.compile(r"[:()\[\]{}]")
+
+
+def _is_nonbase(text: str, start: int, end: int, clause_left: int, clause_right: int) -> bool:
+    # An extras noun (allowance/travel/internet/one-time/bonus...) marks the
+    # amount only when it is attached to it: immediately before the figure, or
+    # right after it with no stated period in between. A cue in the clause never
+    # rescues an attached extras noun, so "Travel stipend ₹2,000/month" is a
+    # travel amount, not the stipend base. A benefit word merely elsewhere in the
+    # clause ("₹30,000 per month for travel", "₹30,000/month (food not
+    # included)") is detached and leaves the stipend as the base.
+    label = text[clause_left:start]
+    boundaries = list(_LABEL_BOUNDARY_RE.finditer(label))
+    if boundaries:
+        label = label[boundaries[-1].end():]
+    if _NONBASE_RE.search(label):
+        return True
+    if _period_after(text, end) is not None:
+        return False
+    return bool(_NONBASE_RE.search(text[end:clause_right]))
 
 
 def _cue_rank(clause: str) -> int:
@@ -408,7 +425,7 @@ def _add(
             value=value,
             kind=kind,
             conditional=_is_conditional(clause),
-            nonbase=_is_nonbase(clause),
+            nonbase=_is_nonbase(text, start, end, clause_left, clause_right),
             divisor=divisor,
             cue_rank=_cue_rank(clause),
         )
@@ -469,7 +486,7 @@ def _add_range(
                 value=value,
                 kind=kind,
                 conditional=_is_conditional(clause),
-                nonbase=_is_nonbase(clause),
+                nonbase=_is_nonbase(text, start, end, clause_left, clause_right),
                 cue_rank=_cue_rank(clause),
             )
         )

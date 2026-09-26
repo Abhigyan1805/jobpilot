@@ -64,8 +64,6 @@ class ReviewCandidate:
     page_count: int = 0
     page_limit: int = 0
     parseability_ok: bool | None = None
-    #: Stipend classification (see ``jobpilot.stipend``), set by the selection.
-    stipend: StipendInfo = field(default_factory=StipendInfo)
 
     @property
     def company(self) -> str:
@@ -315,7 +313,6 @@ def select_matches(
             _stipend_text(candidate.posting),
             floor=int(config.filter.stipend_floor),
         )
-        candidate.stipend = stipend
         if stipend.state in DROPPED_STATES:
             result.excluded.append(ExcludedCandidate(candidate, stipend.display_label()))
             continue
