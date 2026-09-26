@@ -64,7 +64,6 @@ class ReviewCandidate:
     page_count: int = 0
     page_limit: int = 0
     parseability_ok: bool | None = None
-    applicants: int = 0
     #: Stipend classification (see ``jobpilot.stipend``), set by the selection.
     stipend: StipendInfo = field(default_factory=StipendInfo)
 
@@ -139,7 +138,6 @@ def _posting_from_row(row) -> JobPosting:
         employment_type=row["employment_type"] or "",
         published_at=row["published_at"] or "",
         is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
-        applicants=(int(row["applicants"] or 0) if "applicants" in row.keys() else 0),
     )
 
 
@@ -184,9 +182,6 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
                 page_count=int(row["resume_pages"] or 0),
                 page_limit=int(row["resume_page_limit"] or 0),
                 parseability_ok=parseability_ok,
-                applicants=(
-                    posting_row["applicants"] or 0 if "applicants" in posting_row.keys() else 0
-                ),
             )
         )
     return candidates
@@ -617,13 +612,6 @@ def _copy_asset(src: str, dest: Path) -> str:
     return dest.name
 
 
-def _applicants_span(candidate: ReviewCandidate) -> str:
-    """A visible applicant-count warning; captained from the board, never a cutoff."""
-    if candidate.applicants <= 0:
-        return ""
-    return f'<span><b>Applicants:</b> {candidate.applicants} (may close early)</span>'
-
-
 def _render_card(
     match: PresentMatch,
     rank: int,
@@ -691,7 +679,6 @@ def _render_card(
         <span><b>Source:</b> {_esc(c.posting.source)}</span>
         <span><b>Technical relevance:</b> {match.technical_relevance:.2f}{_esc(f" ({match.best_domain})" if match.best_domain else "")}</span>
         <span><b>Stipend:</b> {_esc(match.stipend.display_label())}</span>
-        {_applicants_span(c)}
       </div>
       <div class="chips"><span class="chip">{_esc(domains or "no target domains")}</span></div>
       {_badge_row(c)}

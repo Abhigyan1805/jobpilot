@@ -377,16 +377,14 @@ class UnstopTests(unittest.TestCase):
         self.assertIn("Machine Learning", posting.description)
         self.assertIn("Bengaluru", posting.location)
 
-    def test_captures_registration_metadata_and_applicant_count(self):
+    def test_captures_registration_metadata(self):
         adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
         row = {
             **self.ROW,
             "regn_open": 1,
-            "registerCount": "42",
             "end_date": "2030-06-30T00:00:00+05:30",
         }
         posting = adapter._normalise(row)
-        self.assertEqual(posting.applicants, 42)
         self.assertEqual(posting.raw["regn_open"], 1)
         self.assertEqual(posting.raw["end_date"], "2030-06-30T00:00:00+05:30")
 

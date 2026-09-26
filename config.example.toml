@@ -138,9 +138,10 @@ window_end_month = 6
 stipend_floor = 30000
 
 # Postings you have already applied to, excluded from `jobpilot present`
-# entirely (case-insensitive company+title and url match, so a re-discovery is
-# also excluded). This is a filter, never a deletion from the store. Defaults to
-# the shipped list; set it to "" to disable the exclusion entirely.
+# entirely (matched by url or stable id/source+job_id, so a re-discovery is
+# excluded while a new same-company/same-title posting is not). This is a filter,
+# never a deletion from the store. Defaults to the shipped list; set it to "" to
+# disable the exclusion entirely.
 exclude_file = "data/applied-postings.toml"
 
 # ---------------------------------------------------------------------------

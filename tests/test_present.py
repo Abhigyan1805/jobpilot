@@ -52,7 +52,6 @@ def candidate(
     review_category="",
     review_reason="",
     parseability_ok=None,
-    applicants=0,
 ):
     return ReviewCandidate(
         review_id=1,
@@ -67,7 +66,6 @@ def candidate(
         review_category=review_category,
         review_reason=review_reason,
         parseability_ok=parseability_ok,
-        applicants=applicants,
     )
 
 
@@ -621,21 +619,6 @@ class RenderTests(unittest.TestCase):
         reasons = " ".join(e.reason for e in selection.excluded)
         self.assertIn("below floor", reasons)
         self.assertIn("unpaid", reasons)
-
-    def test_applicant_count_is_shown_when_present(self):
-        with_applicants = candidate(
-            posting(job_id="applicants-1", title="Machine Learning Intern", description=ML_JD),
-            matched=["Python", "RAG"],
-            resume=str(self.resume),
-            cover=str(self.cover),
-            applicants=137,
-        )
-        selection = select_matches([with_applicants], self.matcher, self.cfg)
-        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("Applicants:", html)
-        self.assertIn("137", html)
 
     def test_run_present_reads_the_store_and_writes_the_page(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))

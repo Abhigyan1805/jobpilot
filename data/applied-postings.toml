@@ -1,6 +1,7 @@
 # Postings already applied to from the 2026-09-25 review page.
 # Consumed by `jobpilot present` via [filter].exclude_file (never deleted from the store).
-# Matched case-insensitively on company+title and on url, so a re-discovery is also excluded.
+# Matched by url or stable id/source+job_id, not company+title, so the exact same posting is
+# excluded on re-discovery while a new same-company/same-title posting is not.
 
 [[applied]]
 source = "greenhouse"

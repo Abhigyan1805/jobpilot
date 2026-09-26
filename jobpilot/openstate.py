@@ -17,8 +17,8 @@ the hard filter, from signals that are already present on the posting:
 
 An *unknown* end date or absent registration metadata is **unverified**, not
 closed: the posting stays open-but-unverified and is never dropped for missing
-information. ``registerCount`` is never an automatic rejection - it is captured
-elsewhere so the review page can warn ("N applicants") without capping.
+information. An applicant count is not an open-state signal at all: the tool
+never reads it, so volume can never silently close a posting.
 """
 
 from __future__ import annotations

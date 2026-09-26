@@ -27,9 +27,6 @@ class JobPosting:
     apply_email: str = ""
     is_remote: bool | None = None
     salary: str = ""
-    #: Number of applicants a board reports (``registerCount`` on Unstop), or 0
-    #: when unknown. Shown as a warning on the review page; never a hard cutoff.
-    applicants: int = 0
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property

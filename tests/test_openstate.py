@@ -119,13 +119,13 @@ class FilterIntegrationTests(unittest.TestCase):
         self.assertTrue(any("application_open" in r for r in result.reject_reasons))
 
     def test_filter_rejects_unstop_past_end_date_when_metadata_present(self):
-        p = _unstop(regn_open=1, end_date="2020-01-05", registerCount=120)
+        p = _unstop(regn_open=1, end_date="2020-01-05")
         result = filter_posting(p, self.cfg.filter)
         self.assertFalse(result.eligible)
         self.assertTrue(any("application_open" in r for r in result.reject_reasons))
 
     def test_filter_keeps_unstop_open_row_with_future_end_date(self):
-        p = _unstop(regn_open=1, end_date="2030-06-30", registerCount=3)
+        p = _unstop(regn_open=1, end_date="2030-06-30")
         result = filter_posting(p, self.cfg.filter)
         self.assertTrue(result.eligible, result.reject_text())
 

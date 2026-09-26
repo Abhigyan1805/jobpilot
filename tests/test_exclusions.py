@@ -1,9 +1,10 @@
 """Tests for the already-applied exclusion list.
 
 The list is a presentation/selection filter, never a deletion: it matches a
-re-discovery of the same posting case-insensitively on company+title and on url,
-and the shipped ``data/applied-postings.toml`` carries the 45 from the current
-review page.
+re-discovery of the exact same posting by url or stable id/source+job_id, so a
+new posting from the same company with the same generic title is not hidden. The
+shipped ``data/applied-postings.toml`` carries the 45 from the current review
+page.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ def _write_list(tmp: str, body: str) -> str:
 
 
 class ExclusionMatchTests(unittest.TestCase):
-    def test_company_and_title_match_is_case_insensitive(self):
+    def test_company_and_title_alone_matches_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_list(
                 tmp,
@@ -43,20 +44,57 @@ class ExclusionMatchTests(unittest.TestCase):
             )
             entries = ExclusionList.load(path)
         match = entries.match(
-            posting(company="rubrik job board", title="software engineer - winter intern")
+            posting(company="Rubrik Job Board", title="Software Engineer - Winter Intern")
         )
-        self.assertIsNotNone(match)
+        self.assertIsNone(match)
 
-    def test_company_title_whitespace_is_normalised(self):
+    def test_same_company_and_title_with_different_url_is_not_excluded(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_list(
-                tmp, '[[applied]]\ncompany = "PrepLinc AI"\ntitle = "AI/ML  Application Developer Internship"\n'
+                tmp,
+                '[[applied]]\ncompany = "Rubrik Job Board"\ntitle = "Data Science Internship"\n'
+                'url = "https://unstop.com/internships/data-science-1760453"\n',
             )
             entries = ExclusionList.load(path)
-        match = entries.match(
-            posting(company=" preplinc ai ", title="AI/ML Application Developer Internship")
+        p = posting(
+            source="unstop",
+            job_id="99",
+            company="Rubrik Job Board",
+            title="Data Science Internship",
         )
-        self.assertIsNotNone(match)
+        p.url = "https://unstop.com/internships/data-science-9999999"
+        self.assertIsNone(entries.match(p))
+
+    def test_same_url_or_stable_id_is_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_list(
+                tmp,
+                '[[applied]]\ncompany = "Rubrik Job Board"\ntitle = "Data Science Internship"\n'
+                'url = "https://unstop.com/internships/data-science-1760453"\n',
+            )
+            entries = ExclusionList.load(path)
+        same_url = posting(
+            source="unstop",
+            job_id="99",
+            company="Rubrik Job Board",
+            title="Data Science Internship",
+        )
+        same_url.url = "https://Unstop.com/internships/data-science-1760453/"
+        self.assertIsNotNone(entries.match(same_url))
+
+        same_id = posting(
+            source="unstop",
+            job_id="1760453",
+            company="Rubrik Job Board",
+            title="Data Science Internship",
+        )
+        same_id.url = "https://unstop.com/internships/elsewhere"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_list(
+                tmp, '[[applied]]\nsource = "unstop"\njob_id = "1760453"\n'
+            )
+            entries = ExclusionList.load(path)
+        self.assertIsNotNone(entries.match(same_id))
 
     def test_url_match_ignores_case_and_trailing_slash(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,17 +140,14 @@ class ShippedListTests(unittest.TestCase):
         path = Path(__file__).resolve().parent.parent / "data" / "applied-postings.toml"
         entries = ExclusionList.load(path)
         self.assertEqual(entries.count, 45)
-        # A known member of the page is excluded by company+title even though its
-        # stable id would differ on re-discovery.
-        self.assertIsNotNone(
-            entries.match(
-                posting(
-                    source="unstop",
-                    company="Rubrik Job Board",
-                    title="Software Engineer - Winter Intern",
-                )
-            )
-        )
+        # A known member of the page is excluded by its url on re-discovery.
+        p = posting(source="unstop", job_id="99")
+        p.url = "https://www.rubrik.com/company/careers/departments/job.8166523?gh_jid=8166523"
+        self.assertIsNotNone(entries.match(p))
+        # The same company/title with a different identity is a new posting.
+        other = posting(source="unstop", job_id="100")
+        other.url = "https://www.rubrik.com/company/careers/departments/job.9999999"
+        self.assertIsNone(entries.match(other))
 
 
 class SelectionExclusionTests(unittest.TestCase):
@@ -124,7 +159,8 @@ class SelectionExclusionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_list(
                 tmp,
-                '[[applied]]\ncompany = "Acme"\ntitle = "Machine Learning Intern"\n',
+                '[[applied]]\ncompany = "Acme"\ntitle = "Machine Learning Intern"\n'
+                'url = "https://example.com/greenhouse/1"\n',
             )
             cfg = test_config(filt={"exclude_file": path})
             matcher = Matcher(mini_profile(), cfg)
@@ -139,7 +175,9 @@ class SelectionExclusionTests(unittest.TestCase):
     def test_select_matches_still_includes_a_non_excluded_posting(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_list(
-                tmp, '[[applied]]\ncompany = "Someone Else"\ntitle = "Marketing Intern"\n'
+                tmp,
+                '[[applied]]\ncompany = "Acme"\ntitle = "Machine Learning Intern"\n'
+                'url = "https://example.com/greenhouse/999"\n',
             )
             cfg = test_config(filt={"exclude_file": path})
             matcher = Matcher(mini_profile(), cfg)
@@ -167,7 +205,8 @@ class DefaultExclusionFileTests(unittest.TestCase):
         data = Path(tmp) / "data"
         data.mkdir()
         (data / "applied-postings.toml").write_text(
-            '[[applied]]\ncompany = "Acme"\ntitle = "Machine Learning Intern"\n',
+            '[[applied]]\ncompany = "Acme"\ntitle = "Machine Learning Intern"\n'
+            'url = "https://example.com/greenhouse/1"\n',
             encoding="utf-8",
         )
 

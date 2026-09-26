@@ -358,6 +358,27 @@ class NegativeFormsTests(unittest.TestCase):
             classify_stipend("Unpaid internship; certificate worth ₹5,000").state, UNPAID
         )
 
+    def test_unpaid_or_conditional_beats_a_package_figure(self):
+        # A CTC/annual package figure is not the stipend's own figure and must
+        # never override an explicit unpaid or conditional stipend.
+        for text in (
+            "Unpaid internship. CTC ₹6,00,000/annum.",
+            "No stipend. Annual package: ₹6,00,000.",
+            "Stipend: Unpaid. Salary ₹8,00,000 per annum.",
+            "Stipend: up to ₹15,000/month. CTC ₹6,00,000/annum.",
+            "commission only. Salary: 50000 per month",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNPAID, text)
+            self.assertTrue(info.dropped, text)
+
+    def test_cue_less_monthly_stipend_beats_an_earlier_package_figure(self):
+        # Both figures are cue-less; the monthly rate is the stipend, so a
+        # preceding annual package figure must not win.
+        info = classify_stipend("CTC ₹6,00,000/annum. ₹15,000/month")
+        self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(info.amount, 15000)
+
     def test_negated_or_comparative_unpaid_does_not_beat_a_confirmed_figure(self):
         for text in (
             "We do not offer unpaid internships. Stipend: ₹30,000/month.",

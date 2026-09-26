@@ -5,12 +5,15 @@ to see those again. This is deliberately a *filter*, never a deletion: the
 postings stay in the store and the review queue, and ``jobpilot present`` simply
 drops any posting the exclusion list matches before it renders.
 
-Entries are matched the way a re-discovery of the same posting would be, so the
-list keeps working across runs:
+Entries are matched by *identity only*, the way a re-discovery of the exact same
+posting would be, so the list keeps working across runs without hiding a
+genuinely new posting that shares a company and a generic title:
 
-* case-insensitively on ``company`` + ``title`` (whitespace-normalised), and
 * on ``url`` (scheme/host/case/trailing-slash/query-normalised), and
 * exactly on a supplied ``stable_id`` or ``source`` + ``job_id``.
+
+An entry with neither a url nor a source/job id matches nothing; there is no
+company+title fallback.
 
 The list lives in a tracked TOML data file (``data/applied-postings.toml`` by
 default) referenced from ``[filter].exclude_file``. A missing or empty file
@@ -23,10 +26,6 @@ import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
-
-
-def _norm_text(value) -> str:
-    return " ".join(str(value or "").split()).casefold()
 
 
 def _norm_url(value) -> str:
@@ -90,11 +89,9 @@ class ExclusionList:
         return cls(entries=tuple(entries))
 
     def match(self, posting) -> ExclusionEntry | None:
-        """Return the entry matching the posting, or ``None``."""
+        """Return the entry matching the posting's identity, or ``None``."""
         url = _norm_url(getattr(posting, "url", ""))
         apply_url = _norm_url(getattr(posting, "apply_url", ""))
-        company = _norm_text(getattr(posting, "company", ""))
-        title = _norm_text(getattr(posting, "title", ""))
         source = str(getattr(posting, "source", ""))
         job_id = str(getattr(posting, "job_id", ""))
         stable_id = f"{source}:{job_id}" if source else job_id
@@ -106,14 +103,5 @@ class ExclusionList:
                 return entry
             entry_url = _norm_url(entry.url)
             if entry_url and (entry_url == url or entry_url == apply_url):
-                return entry
-            if (
-                entry.company
-                and entry.title
-                and company
-                and title
-                and _norm_text(entry.company) == company
-                and _norm_text(entry.title) == title
-            ):
                 return entry
         return None

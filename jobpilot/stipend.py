@@ -201,8 +201,6 @@ class StipendInfo:
     state: str = UNSTATED
     amount: int | None = None
     amount_high: int | None = None
-    note: str = ""
-    period: str = "month"
 
     @property
     def confirmed(self) -> bool:
@@ -226,8 +224,8 @@ class StipendInfo:
         return f"{shown} confirmed" if self.state == CONFIRMED_GE_FLOOR else f"{shown} below floor"
 
 
-def _unstated(note: str = "") -> StipendInfo:
-    return StipendInfo(state=UNSTATED, note=note)
+def _unstated() -> StipendInfo:
+    return StipendInfo(state=UNSTATED)
 
 
 def _to_int(number: str, k_shorthand: str | None, multiplier: int = 1) -> int | None:
@@ -493,6 +491,23 @@ def _collect_amounts(text: str) -> list[_Amount]:
     return amounts
 
 
+def _confirmed(text: str, governing: list[_Amount], floor: int) -> StipendInfo:
+    """Classify the floor against the chosen governing stipend figures."""
+    ordered = sorted(governing, key=lambda a: a.start)
+    pairs = [
+        (ordered[i], ordered[i + 1])
+        for i in range(len(ordered) - 1)
+        if _RANGE_BETWEEN_RE.match(text[ordered[i].end : ordered[i + 1].start])
+    ]
+    if pairs:
+        low = min(pairs[0][0].monthly, pairs[0][1].monthly)
+        high = max(pairs[0][0].monthly, pairs[0][1].monthly)
+    else:
+        low = high = ordered[0].monthly
+    state = CONFIRMED_GE_FLOOR if low >= int(floor) else CONFIRMED_BELOW_FLOOR
+    return StipendInfo(state=state, amount=low, amount_high=high)
+
+
 def classify_stipend(
     text: str,
     *,
@@ -505,40 +520,36 @@ def classify_stipend(
     """
     text = text or ""
     amounts = _collect_amounts(text)
-    # Judge the floor against the posting's governing stipend figure - the
-    # recurring/fixed amount tied to a stipend cue - never against min() of
-    # unrelated numbers (headcount, a benefit's worth, a one-time bonus or an
-    # allowance), which must not drag a qualifying base below the floor.
+    unpaid_signal = bool(_UNPAID_RE.search(text))
+    performance_signal = bool(_PERFORMANCE_RE.search(text))
+
+    # Judge the floor against the posting's governing stipend figure - the base
+    # amount carrying the strongest pay cue. A conditional or non-base amount at
+    # that same cue rank *is* the governing evidence, so a weaker cue-less
+    # package figure (a CTC/annual salary) must not confirm the floor. An
+    # explicit unpaid statement is overridden only by a figure tied to the
+    # stipend itself, never by a broader salary/package figure.
     base = [a for a in amounts if a.is_base]
     if base:
-        groups: dict[int, list[_Amount]] = {}
-        for amount in base:
-            groups.setdefault(amount.cue_rank, []).append(amount)
-        ordered = sorted(groups[max(groups)], key=lambda a: a.start)
-        pairs = [
-            (ordered[i], ordered[i + 1])
-            for i in range(len(ordered) - 1)
-            if _RANGE_BETWEEN_RE.match(text[ordered[i].end : ordered[i + 1].start])
-        ]
-        if pairs:
-            low = min(pairs[0][0].monthly, pairs[0][1].monthly)
-            high = max(pairs[0][0].monthly, pairs[0][1].monthly)
-        else:
-            low = high = ordered[0].monthly
-        state = CONFIRMED_GE_FLOOR if low >= int(floor) else CONFIRMED_BELOW_FLOOR
-        return StipendInfo(
-            state=state,
-            amount=low,
-            amount_high=high,
-            note="confirmed monthly figure",
-        )
+        top_rank = max(a.cue_rank for a in amounts)
+        governing = [a for a in base if a.cue_rank == top_rank]
+        if unpaid_signal and top_rank < 2:
+            governing = []
+        if governing:
+            if top_rank == 0:
+                monthly = [a for a in governing if a.kind == "month"]
+                if monthly:
+                    governing = monthly
+            return _confirmed(text, governing, floor)
+        if any(
+            not a.is_base and a.cue_rank == top_rank and a.conditional for a in amounts
+        ):
+            return StipendInfo(state=UNPAID)
 
-    if _UNPAID_RE.search(text):
-        return StipendInfo(state=UNPAID, note="the posting states there is no fixed paid stipend")
+    if unpaid_signal:
+        return StipendInfo(state=UNPAID)
     if amounts and all(a.conditional for a in amounts):
-        return StipendInfo(state=UNPAID, note="pay is performance-based or conditional")
-    if _PERFORMANCE_RE.search(text):
-        return StipendInfo(state=UNPAID, note="performance-based or commission-only pay")
-    if _CUE_RE.search(text):
-        return _unstated("a stipend is mentioned without a fixed figure")
-    return _unstated("no stipend stated")
+        return StipendInfo(state=UNPAID)
+    if performance_signal:
+        return StipendInfo(state=UNPAID)
+    return _unstated()
