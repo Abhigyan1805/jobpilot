@@ -149,9 +149,11 @@ _UNPAID_RE = re.compile(
 #: offer unpaid internships", "not an unpaid one", "unpaid roles are not
 #: offered". Such a negation must not override a real confirmed figure.
 _UNPAID_NEGATION_RE = re.compile(
-    r"\b(?:not|never|no|isn'?t|aren'?t|wasn'?t|weren'?t|don'?t|doesn'?t|didn'?t|won'?t|can'?t|cannot)\b"
-    r"[^.;|\n]{0,40}?\bunpaid\b"
-    r"|\bunpaid\b[^.;|\n]{0,40}?\b(?:is|are|will\s+be|would\s+be|was|were)?\s*not\s+"
+    r"\b(?:not|never|no)\s+"
+    r"(?:(?:offer|offering|provide|providing|hire|hiring|accept|accepting|allow|allowing)\s+)?"
+    r"(?:an?\s+)?unpaid\b"
+    r"|\bunpaid\b\s+(?:roles?|internships?|positions?|jobs?)?\s*"
+    r"(?:are|is|will\s+be|would\s+be|was|were)?\s*not\s+"
     r"(?:offered|available|provided|accepted|hiring|hired)\b",
     re.IGNORECASE,
 )
@@ -569,7 +571,7 @@ def classify_stipend(
     if unpaid_signal:
         return StipendInfo(state=UNPAID)
     if amounts and all(a.conditional for a in amounts):
-        return StipendInfo(state=UNPAID)
+        return StipendInfo(state=UNSTATED)
     if performance_signal:
         return StipendInfo(state=UNPAID)
     return _unstated()

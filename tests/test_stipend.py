@@ -397,6 +397,29 @@ class NegativeFormsTests(unittest.TestCase):
         self.assertEqual(info.amount, 15000)
         self.assertTrue(info.dropped)
 
+    def test_upper_bound_only_stipend_is_unstated_not_unpaid(self):
+        # An "up to X" cap cannot confirm the floor, so it is unknown and must be
+        # surfaced for verification - never dropped as unpaid.
+        for text in (
+            "Stipend: up to ₹50,000/month",
+            "upto ₹35,000/month",
+            "Stipend: up to 40k per month",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+
+    def test_genuine_unpaid_statements_survive_a_cross_phrase_negation(self):
+        # A negation that governs a different phrase ("no stipend", "not paying")
+        # must not suppress a genuine "unpaid" claim.
+        for text in (
+            "No stipend, unpaid internship.",
+            "Not a paid role, unpaid role.",
+            "We are not paying, unpaid internship.",
+            "No salary, unpaid internship.",
+        ):
+            self.assertEqual(classify_stipend(text).state, UNPAID, text)
+
     def test_cue_less_monthly_stipend_beats_an_earlier_package_figure(self):
         # Both figures are cue-less; the monthly rate is the stipend, so a
         # preceding annual package figure must not win.
