@@ -297,7 +297,6 @@ def stipend_check(posting: JobPosting, cfg) -> CheckResult:
     info = classify_stipend(
         text,
         floor=int(getattr(cfg, "stipend_floor", 30000)),
-        currency=str(getattr(cfg, "stipend_currency", "INR")),
     )
     posting.stipend_state = info.state
     posting.stipend_amount = info.amount or 0

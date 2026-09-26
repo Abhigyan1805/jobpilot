@@ -214,10 +214,11 @@ Two more presentation-layer rules apply. A `[filter].stipend_floor` (default
 explicitly unpaid/performance-based; postings whose stipend is simply *not
 stated* are kept but shown in a separate **"Stipend not stated — verify before
 applying"** section, never silently failed. And `[filter].exclude_file` names a
-tracked TOML list of postings already applied to; `present` drops them entirely
-(matched case-insensitively on company+title and on url), without deleting
-anything from the store. Each card shows its stipend outcome and, when the board
-reports it, an applicant count as a warning (never a cutoff).
+tracked TOML list of postings already applied to (default
+`data/applied-postings.toml`, set to `""` to disable); `present` drops them
+entirely (matched case-insensitively on company+title and on url), without
+deleting anything from the store. Each card shows its stipend outcome and, when
+the board reports it, an applicant count as a warning (never a cutoff).
 
 ### Tracking: outcomes, follow-ups and the skill-gap heatmap
 

@@ -72,6 +72,41 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(classify_stipend("₹25,000/month", floor=20000).state, CONFIRMED_GE_FLOOR)
         self.assertEqual(classify_stipend("₹25,000/month", floor=30000).state, CONFIRMED_BELOW_FLOOR)
 
+    def test_currency_prefixed_shorthand_range_reads_the_whole_range(self):
+        # The lower bound must not be read as a bare "40" amount: the whole
+        # range is thousands, so it clears a ₹30,000 floor.
+        info = classify_stipend("₹40-50k per month")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual((info.amount, info.amount_high), (40000, 50000))
+
+    def test_non_monthly_period_is_not_read_as_monthly(self):
+        # An hourly/weekly rate must never clear (or fail) the monthly floor.
+        for text in ("₹45,000 per hour", "Stipend: ₹45,000 per hour"):
+            info = classify_stipend(text)
+            self.assertNotEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertFalse(info.dropped, text)
+        weekly = classify_stipend("Stipend: ₹10,000/week")
+        self.assertFalse(weekly.dropped)
+        self.assertNotEqual(weekly.state, CONFIRMED_GE_FLOOR)
+
+    def test_annual_figures_are_not_mangled(self):
+        per_annum = classify_stipend("₹6,00,000 per annum")
+        self.assertEqual(per_annum.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(per_annum.amount, 50000)
+        self.assertNotIn("-", per_annum.display_label())
+
+        lpa = classify_stipend("Stipend: 6 LPA")
+        self.assertEqual(lpa.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(lpa.amount, 50000)
+
+    def test_explicit_two_thousand_amount_is_not_dropped_as_a_year(self):
+        for text in ("₹2000/month", "Stipend: 2000 per month"):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR, text)
+            self.assertEqual(info.amount, 2000, text)
+        # A *bare* four-digit year is still not a stipend amount.
+        self.assertEqual(classify_stipend("Stipend: 2026").state, UNSTATED)
+
 
 class NegativeFormsTests(unittest.TestCase):
     def test_explicit_unpaid_and_no_stipend(self):

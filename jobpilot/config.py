@@ -207,20 +207,16 @@ class FilterConfig:
     allow_unknown_location: bool = False
     window_start_month: int = 1
     window_end_month: int = 6
-    #: Minimum monthly stipend, in ``stipend_currency`` per ``stipend_period``.
-    #: A confirmed figure at/above the floor is shown in the main list; a
-    #: confirmed figure below it, or an explicitly unpaid posting, is dropped; a
-    #: posting whose stipend is not stated is shown in a separate verify section.
+    #: Minimum monthly stipend (INR, monthly by design). A confirmed figure
+    #: at/above the floor is shown in the main list; a confirmed figure below it,
+    #: or an explicitly unpaid posting, is dropped; a posting whose stipend is
+    #: not stated is shown in a separate verify section.
     stipend_floor: int = 30000
-    #: Documentation of the parser's assumptions. The extractor recognises the
-    #: INR surface forms (₹/Rs/INR/rupees); a bare figure is read as monthly.
-    stipend_currency: str = "INR"
-    stipend_period: str = "month"
-    #: Optional TOML file listing postings already applied to (see
-    #: ``jobpilot/exclusions.py``). Resolved relative to the config file.
-    #: Entries are filtered out of ``jobpilot present``; they are never deleted
-    #: from the store.
-    exclude_file: str = ""
+    #: TOML file listing postings already applied to (see
+    #: ``jobpilot/exclusions.py``). Resolved relative to the config file. Entries
+    #: are filtered out of ``jobpilot present``; they are never deleted from the
+    #: store. Defaults to the shipped list; set it to an empty string to disable.
+    exclude_file: str = "data/applied-postings.toml"
 
 
 @dataclass

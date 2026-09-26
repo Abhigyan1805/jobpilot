@@ -8,12 +8,13 @@ internship listings is inconsistent (``Stipend: INR 15,000-18,000/ month``,
 this module normalises it into one small enum instead of leaving each caller to
 grep for its own pattern.
 
-Assumptions (explicit, and configurable through ``[filter]``):
+Assumptions (explicit):
 
-* The floor is a *monthly* amount and the default currency is INR. A figure
-  with no stated period is treated as monthly. An explicitly annual figure is
-  divided by twelve; any other explicit period (per day/week/hour) cannot
-  confirm a monthly floor and is left ``unstated`` rather than guessed at.
+* The parser is INR-only and monthly-by-design; ``[filter].stipend_floor`` is the
+  only stipend knob. The floor is a *monthly* amount. A figure with no stated
+  period is treated as monthly. An explicitly annual figure is divided by twelve;
+  any other explicit period (per day/week/hour) cannot confirm a monthly floor
+  and is left ``unstated`` rather than guessed at.
 * A range is judged by its *lower* bound, so ``₹25,000-35,000`` does not clear a
   ₹30,000 floor. The upper bound is kept only for display.
 * ``unpaid`` covers the clearly non-fixed forms (``Unpaid``,
@@ -41,14 +42,17 @@ UNPAID = "unpaid"
 UNSTATED = "unstated"
 
 DEFAULT_FLOOR = 30000
-DEFAULT_CURRENCY = "INR"
 
 #: States that must never appear on the main list.
 DROPPED_STATES = frozenset({CONFIRMED_BELOW_FLOOR, UNPAID})
 
+#: The parser recognises only the INR surface forms (``₹``/``Rs``/``INR``/
+#: ``rupees``); a foreign-currency figure is never invented into rupees.
 _CURRENCY = r"(?:₹|rs\.?|inr|rupees?)"
 _MONTH_PERIOD = r"(?:per\s+month|/\s*months?\b|/\s*mo\b|monthly|p\.?m\.?\b|a\s+month|pcm)"
-_YEAR_PERIOD = r"(?:per\s+(?:year|annum)|/\s*(?:year|annum)|yearly|annually|lpa|per\s+annum)"
+_YEAR_PERIOD = r"(?:per\s+(?:year|annum)|/\s*(?:year|annum)|yearly|annually)"
+# LPA / "lakhs per annum" is an annual figure whose number is counted in lakhs.
+_LPA_PERIOD = r"(?:lpa|lakhs?\s+(?:per\s+annum|p\.?a)|lakhs?\s*/\s*(?:year|annum))"
 
 _AMOUNT = r"(\d[\d,]*(?:\.\d+)?)\s*([kK])?"
 
@@ -56,10 +60,16 @@ _MONEY_PREFIX_RE = re.compile(rf"{_CURRENCY}\s*{_AMOUNT}", re.IGNORECASE)
 _MONEY_SUFFIX_RE = re.compile(rf"{_AMOUNT}\s*{_CURRENCY}(?![a-z])", re.IGNORECASE)
 _MONEY_MONTH_RE = re.compile(rf"{_AMOUNT}\s*(?:/-)?\s*{_MONTH_PERIOD}", re.IGNORECASE)
 _MONEY_YEAR_RE = re.compile(rf"{_AMOUNT}\s*(?:/-)?\s*{_YEAR_PERIOD}", re.IGNORECASE)
+_MONEY_LPA_RE = re.compile(rf"{_AMOUNT}\s*{_LPA_PERIOD}\b", re.IGNORECASE)
 # Bare shorthand ranges ("12-15k per month"): the K on the second number applies
-# to the whole range, so both ends are thousands.
+# to the whole range, so both ends are thousands. An LPA range ("6-8 LPA") is the
+# same idea with the lakh unit.
 _RANGE_K_RE = re.compile(
     r"(\d[\d,]*(?:\.\d+)?)\s*[-–]\s*(\d[\d,]*(?:\.\d+)?)\s*[kK]\b",
+    re.IGNORECASE,
+)
+_RANGE_LPA_RE = re.compile(
+    rf"(\d[\d,]*(?:\.\d+)?)\s*[-–]\s*(\d[\d,]*(?:\.\d+)?)\s*{_LPA_PERIOD}\b",
     re.IGNORECASE,
 )
 # A bare number only counts inside a clause that already talks about stipends.
@@ -72,6 +82,18 @@ _DURATION_AFTER_RE = re.compile(
     r"|\s*%",
     re.IGNORECASE,
 )
+
+#: An explicit period after a figure decides whether it can be read as monthly.
+#: Month/year slash forms are already consumed by the money patterns; this
+#: catches a postposed ``per day``/``/week``/``a hour`` so a non-monthly rate is
+#: never silently treated as a floor-clearing monthly amount.
+_AFTER_PERIOD_RE = re.compile(
+    r"\s*(?:/-)?\s*(?:(?:per\s+|/\s*|a\s+)(?P<unit>months?|years?|annum|weeks?|days?|hours?)"
+    r"|(?P<word>monthly|yearly|annually))\b",
+    re.IGNORECASE,
+)
+_YEAR_UNITS = frozenset({"year", "years", "annum", "yearly", "annually"})
+_MONTH_UNITS = frozenset({"month", "months", "monthly"})
 
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(
@@ -142,13 +164,15 @@ def _unstated(note: str = "") -> StipendInfo:
     return StipendInfo(state=UNSTATED, note=note)
 
 
-def _to_int(number: str, k_shorthand: str | None) -> int | None:
+def _to_int(number: str, k_shorthand: str | None, multiplier: int = 1) -> int | None:
     try:
         value = float(number.replace(",", ""))
     except (TypeError, ValueError):
         return None
     if k_shorthand:
         value *= 1000
+    else:
+        value *= multiplier
     value = int(round(value))
     if value <= 0 or value > 10_000_000:
         return None
@@ -178,6 +202,23 @@ def _is_conditional(text: str, start: int, end: int) -> bool:
     return bool(_PERFORMANCE_RE.search(window) or _CONDITIONAL_RE.search(window))
 
 
+def _overlaps(covered: list[tuple[int, int]], start: int, end: int) -> bool:
+    return any(start < c_end and end > c_start for c_start, c_end in covered)
+
+
+def _period_after(text: str, pos: int) -> str | None:
+    """The kind of period stated right after ``pos``: month, year or other."""
+    match = _AFTER_PERIOD_RE.match(text, pos)
+    if match is None:
+        return None
+    unit = (match.group("unit") or match.group("word") or "").casefold()
+    if unit in _YEAR_UNITS:
+        return "year"
+    if unit in _MONTH_UNITS:
+        return "month"
+    return "other"
+
+
 def _add(
     amounts: list[_Amount],
     covered: list[tuple[int, int]],
@@ -185,18 +226,28 @@ def _add(
     match: re.Match,
     *,
     kind: str,
+    multiplier: int = 1,
+    bare: bool = False,
 ) -> None:
+    if _overlaps(covered, match.start(), match.end()):
+        return
     number = match.group(1)
     shorthand = match.group(2) if match.lastindex and match.lastindex >= 2 else None
-    value = _to_int(number, shorthand)
+    value = _to_int(number, shorthand, multiplier)
     if value is None:
         return
     start, end = match.start(1), match.end(1)
     if _DURATION_AFTER_RE.match(text, end):
         return
-    # A bare four-digit year near a stipend is not a stipend.
-    if not shorthand and "," not in number and re.fullmatch(r"(?:19|20)\d{2}", number):
+    # A *bare* four-digit year near a stipend is not a stipend; an explicit
+    # currency/period/prefixed amount is never discarded this way.
+    if bare and not shorthand and "," not in number and re.fullmatch(r"(?:19|20)\d{2}", number):
         return
+    period = _period_after(text, match.end())
+    if period == "other":
+        return
+    if period == "year":
+        kind = "year"
     amounts.append(
         _Amount(
             start=start,
@@ -214,11 +265,21 @@ def _add_range(
     covered: list[tuple[int, int]],
     text: str,
     match: re.Match,
+    *,
+    multiplier: int,
+    kind: str,
 ) -> None:
-    """Record both ends of a shorthand range whose K marks both numbers."""
+    """Record both ends of a shorthand range whose unit applies to both numbers."""
+    if _overlaps(covered, match.start(), match.end()):
+        return
+    period = _period_after(text, match.end())
+    if period == "other":
+        return
+    if period == "year":
+        kind = "year"
     for group_start in (1, 2):
         number = match.group(group_start)
-        value = _to_int(number, "k")
+        value = _to_int(number, None, multiplier)
         if value is None:
             continue
         start, end = match.start(group_start), match.end(group_start)
@@ -229,7 +290,7 @@ def _add_range(
                 start=start,
                 end=end,
                 value=value,
-                kind="month",
+                kind=kind,
                 conditional=_is_conditional(text, start, end),
             )
         )
@@ -240,11 +301,15 @@ def _collect_amounts(text: str) -> list[_Amount]:
     amounts: list[_Amount] = []
     covered: list[tuple[int, int]] = []
     for match in _RANGE_K_RE.finditer(text):
-        _add_range(amounts, covered, text, match)
+        _add_range(amounts, covered, text, match, multiplier=1000, kind="month")
+    for match in _RANGE_LPA_RE.finditer(text):
+        _add_range(amounts, covered, text, match, multiplier=100_000, kind="year")
     for match in _MONEY_MONTH_RE.finditer(text):
         _add(amounts, covered, text, match, kind="month")
     for match in _MONEY_YEAR_RE.finditer(text):
         _add(amounts, covered, text, match, kind="year")
+    for match in _MONEY_LPA_RE.finditer(text):
+        _add(amounts, covered, text, match, kind="year", multiplier=100_000)
     for match in _MONEY_PREFIX_RE.finditer(text):
         _add(amounts, covered, text, match, kind="month")
     for match in _MONEY_SUFFIX_RE.finditer(text):
@@ -252,12 +317,9 @@ def _collect_amounts(text: str) -> list[_Amount]:
     # Bare numbers count only when they sit in stipend context and do not
     # overlap an amount already found by a currency/period pattern.
     for match in _BARE_AMOUNT_RE.finditer(text):
-        start, end = match.start(), match.end()
-        if any(start < c_end and end > c_start for c_start, c_end in covered):
+        if not _has_cue(text, match.start()):
             continue
-        if not _has_cue(text, start):
-            continue
-        _add(amounts, covered, text, match, kind="month")
+        _add(amounts, covered, text, match, kind="month", bare=True)
     return amounts
 
 
@@ -265,15 +327,12 @@ def classify_stipend(
     text: str,
     *,
     floor: int = DEFAULT_FLOOR,
-    currency: str = DEFAULT_CURRENCY,
 ) -> StipendInfo:
     """Classify a posting's stipend text against a monthly floor.
 
-    ``currency`` is documented for callers/config but the parser only recognises
-    the INR surface forms (``₹``/``Rs``/``INR``/``rupees``); a foreign-currency
-    figure is not invented into rupees.
+    Only the INR surface forms (``₹``/``Rs``/``INR``/``rupees``) are recognised;
+    a foreign-currency figure is never invented into rupees.
     """
-    del currency  # recognised surface forms are INR-only by design
     text = text or ""
     if _UNPAID_RE.search(text):
         return StipendInfo(state=UNPAID, note="the posting states there is no fixed paid stipend")

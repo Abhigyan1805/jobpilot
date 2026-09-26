@@ -321,7 +321,6 @@ def select_matches(
         stipend = classify_stipend(
             _stipend_text(candidate.posting),
             floor=int(config.filter.stipend_floor),
-            currency=str(config.filter.stipend_currency),
         )
         candidate.stipend = stipend
         if stipend.state in DROPPED_STATES:

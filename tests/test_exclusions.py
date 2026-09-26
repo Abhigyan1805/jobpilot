@@ -12,10 +12,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from jobpilot.config import load_config
 from jobpilot.exclusions import ExclusionList, _norm_url
 from jobpilot.matching import Matcher
 from jobpilot.present import ReviewCandidate, select_matches
-from tests.helpers import mini_profile, posting, test_config
+from tests.helpers import MINI_PROFILE, MINI_STYLE, mini_profile, posting, test_config
 
 ML_JD = "Machine learning internship. Python, RAG, LLMs, evaluation."
 
@@ -141,6 +142,52 @@ class SelectionExclusionTests(unittest.TestCase):
                 tmp, '[[applied]]\ncompany = "Someone Else"\ntitle = "Marketing Intern"\n'
             )
             cfg = test_config(filt={"exclude_file": path})
+            matcher = Matcher(mini_profile(), cfg)
+            c = candidate(
+                posting(company="Acme", title="Machine Learning Intern", description=ML_JD)
+            )
+            result = select_matches([c], matcher, cfg)
+        self.assertEqual(len(result.included), 1)
+
+
+class DefaultExclusionFileTests(unittest.TestCase):
+    """The shipped applied-list is active through the default config key."""
+
+    def _config(self, tmp: str, body: str = ""):
+        cfg_path = Path(tmp) / "config.toml"
+        cfg_path.write_text(
+            body + '[output]\ndir = "out"\ndatabase = ":memory:"\n', encoding="utf-8"
+        )
+        cfg = load_config(cfg_path)
+        cfg.profile.path = str(MINI_PROFILE)
+        cfg.profile.style_template = str(MINI_STYLE)
+        return cfg
+
+    def _shipped_list(self, tmp: str) -> None:
+        data = Path(tmp) / "data"
+        data.mkdir()
+        (data / "applied-postings.toml").write_text(
+            '[[applied]]\ncompany = "Acme"\ntitle = "Machine Learning Intern"\n',
+            encoding="utf-8",
+        )
+
+    def test_config_without_the_key_uses_the_shipped_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._shipped_list(tmp)
+            cfg = self._config(tmp)
+            matcher = Matcher(mini_profile(), cfg)
+            c = candidate(
+                posting(company="Acme", title="Machine Learning Intern", description=ML_JD)
+            )
+            result = select_matches([c], matcher, cfg)
+        self.assertEqual(result.included, [])
+        self.assertEqual(len(result.excluded), 1)
+        self.assertIn("already applied", result.excluded[0].reason)
+
+    def test_explicit_empty_string_disables_the_exclusion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._shipped_list(tmp)
+            cfg = self._config(tmp, '[filter]\nexclude_file = ""\n')
             matcher = Matcher(mini_profile(), cfg)
             c = candidate(
                 posting(company="Acme", title="Machine Learning Intern", description=ML_JD)
