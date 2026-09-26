@@ -335,6 +335,7 @@ class GoverningFigureTests(unittest.TestCase):
         for text, state, amount in (
             ("Stipend: ₹30,000/month (food and accommodation not included)", CONFIRMED_GE_FLOOR, 30000),
             ("Stipend: ₹30,000 per month for travel", CONFIRMED_GE_FLOOR, 30000),
+            ("Stipend: 35,000 (Food and Accommodation provided)", CONFIRMED_GE_FLOOR, 35000),
             ("Stipend: ₹10,000 per month (travel allowance extra)", CONFIRMED_BELOW_FLOOR, 10000),
         ):
             info = classify_stipend(text)
@@ -348,6 +349,7 @@ class GoverningFigureTests(unittest.TestCase):
         for text in (
             "Travel stipend ₹2,000/month. Stipend: ₹30,000/month.",
             "Internet stipend 1,000/month. Stipend: 30,000/month.",
+            "Internet stipend: ₹1,000/month. Stipend: ₹30,000/month.",
             "Travel allowance ₹2,000/month. Stipend: ₹30,000/month.",
         ):
             info = classify_stipend(text)

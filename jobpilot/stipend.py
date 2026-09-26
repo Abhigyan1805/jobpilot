@@ -305,28 +305,19 @@ def _is_conditional(clause: str) -> bool:
     return bool(_CONDITIONAL_RE.search(clause))
 
 
-#: Punctuation that ends the label directly attached to an amount, so a benefit
-#: word in a parenthetical or before a colon is not read as the amount's noun.
-_LABEL_BOUNDARY_RE = re.compile(r"[:()\[\]{}]")
-
-
 def _is_nonbase(text: str, start: int, end: int, clause_left: int, clause_right: int) -> bool:
     # An extras noun (allowance/travel/internet/one-time/bonus...) marks the
-    # amount only when it is attached to it: immediately before the figure, or
-    # right after it with no stated period in between. A cue in the clause never
-    # rescues an attached extras noun, so "Travel stipend ₹2,000/month" is a
-    # travel amount, not the stipend base. A benefit word merely elsewhere in the
-    # clause ("₹30,000 per month for travel", "₹30,000/month (food not
-    # included)") is detached and leaves the stipend as the base.
-    label = text[clause_left:start]
-    boundaries = list(_LABEL_BOUNDARY_RE.finditer(label))
-    if boundaries:
-        label = label[boundaries[-1].end():]
-    if _NONBASE_RE.search(label):
+    # amount only when it is directly adjacent to it: immediately before the
+    # figure in its own label, or the noun immediately attached right after it
+    # with no stated period in between. A cue in the clause never rescues an
+    # adjacent extras noun, so "Travel stipend ₹2,000/month" is a travel amount,
+    # not the stipend base. A benefit word that is merely elsewhere in the clause
+    # is detached and leaves the stipend as the base.
+    if _NONBASE_RE.search(text[clause_left:start]):
         return True
     if _period_after(text, end) is not None:
         return False
-    return bool(_NONBASE_RE.search(text[end:clause_right]))
+    return bool(_NONBASE_RE.match(text[end:clause_right].lstrip()))
 
 
 def _cue_rank(clause: str) -> int:
