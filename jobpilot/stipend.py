@@ -25,10 +25,12 @@ Assumptions (explicit):
 * ``unpaid`` covers only the explicit non-fixed forms (``Unpaid``,
   ``no stipend``, ``not paid``, ``commission only``). A posting that merely
   *mentions* a stipend, conditions it on performance, or quotes an ``up to``
-  cap without a fixed figure (``Stipend:``, ``stipend will be provided``,
-  ``based on performance``, ``up to ₹50,000/month``) is ``unstated`` and, per
-  the captain's choice, is surfaced in a separate section instead of being
-  dropped - a missing amount is never invented and never silently fails.
+  cap at or above the floor without a fixed figure (``Stipend:``, ``stipend
+  will be provided``, ``based on performance``, ``up to ₹50,000/month``) is
+  ``unstated`` and, per the captain's choice, is surfaced in a separate section
+  instead of being dropped - a missing amount is never invented and never
+  silently fails. An ``up to`` cap that is itself below the floor is a
+  confirmed below-floor figure and is dropped.
 * The parser reads only rupee postings: the text must carry an INR marker
   (``₹``/``Rs``/``INR``/``rupees``) somewhere, and a figure explicitly quoted in
   another currency (``$``/``USD``/``EUR``/...) is never counted. A posting with

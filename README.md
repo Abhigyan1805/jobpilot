@@ -29,8 +29,10 @@ employer, date, metric or project.
    forbid automation are never scraped: they are surfaced as **link-out** channels
    instead (see below).
 2. **Filtering and matching** - hard filters first (must be an internship, must
-   plausibly run in Jan-Jun, must be open to India or remote from India), then a
-   deterministic, documented scoring rubric against the master profile.
+   plausibly run in Jan-Jun, must be open to India or remote from India, must not
+   be a closed application and must not show a confirmed below-floor or unpaid
+   stipend), then a deterministic, documented scoring rubric against the master
+   profile.
 3. **Tailored resume generation** - selects, reorders and re-emphasises profile
    content in the exact existing LaTeX style, then compiles it to PDF. Also produces
    a short cover letter per application.
@@ -211,10 +213,12 @@ resume content and never submits.
 
 Two more presentation-layer rules apply. A `[filter].stipend_floor` (default
 ₹30,000/month) drops postings whose stipend is confirmed below the floor or is
-explicitly unpaid (including commission-only); a performance-based or `up to`
-stipend with no fixed monthly figure is treated as unknown, exactly like a
-posting whose stipend is simply *not stated*, and is kept but shown in a separate
-**"Stipend not stated — verify before applying"** section, never silently failed. And `[filter].exclude_file` names a
+explicitly unpaid (including commission-only); a performance-conditioned
+stipend, or an `up to` cap at or above the floor, is treated as unknown, exactly
+like a posting whose stipend is simply *not stated*, and is kept but shown in a
+separate **"Stipend not stated — verify before applying"** section, never
+silently failed (an `up to` cap below the floor counts as a confirmed
+below-floor figure and is dropped). And `[filter].exclude_file` names a
 tracked TOML list of postings already applied to (default
 `data/applied-postings.toml`, set to `""` to disable); `present` drops them
 entirely (matched by url or stable id, so a re-discovery is excluded while a
