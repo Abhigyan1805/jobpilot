@@ -149,7 +149,8 @@ _UNPAID_RE = re.compile(
 #: offer unpaid internships", "not an unpaid one", "unpaid roles are not
 #: offered". Such a negation must not override a real confirmed figure.
 _UNPAID_NEGATION_RE = re.compile(
-    r"\b(?:not|never|no)\s+"
+    r"\b(?:not|never|no(?:\s+longer)?|isn'?t|aren'?t|wasn'?t|weren'?t"
+    r"|don'?t|doesn'?t|didn'?t|won'?t|can'?t|cannot)\s+"
     r"(?:(?:offer|offering|provide|providing|hire|hiring|accept|accepting|allow|allowing)\s+)?"
     r"(?:an?\s+)?unpaid\b"
     r"|\bunpaid\b\s+(?:roles?|internships?|positions?|jobs?)?\s*"
@@ -166,16 +167,24 @@ def _has_unpaid_signal(text: str) -> bool:
     return bool(_UNPAID_RE.search(_UNPAID_NEGATION_RE.sub(" ", text)))
 
 
-#: Pay that exists but is not a fixed monthly figure.
-_PERFORMANCE_RE = re.compile(
+_PERFORMANCE_QUALIFIER = (
     r"performance[\s-]?based"
     r"|based\s+on\s+performance"
     r"|\bperformance\s+stipend\b"
     r"|\bvariable\s+(?:stipend|pay|component)\b"
-    r"|\bincentiv(?:e|es)\b",
+)
+#: Pay that exists but is not a fixed monthly figure.
+_PERFORMANCE_RE = re.compile(
+    rf"{_PERFORMANCE_QUALIFIER}|\bincentiv(?:e|es)\b",
     re.IGNORECASE,
 )
-_CONDITIONAL_RE = re.compile(r"\bup\s*to\b", re.IGNORECASE)
+#: Qualifiers that make the amount they attach to conditional. A bare
+#: "incentives" mention is an add-on component, not a condition on the base, so
+#: a fixed monthly figure stays fixed alongside it.
+_CONDITIONAL_RE = re.compile(
+    rf"{_PERFORMANCE_QUALIFIER}|\bup\s*to\b",
+    re.IGNORECASE,
+)
 
 #: Words that put a bare number "in stipend context".
 _CUE_RE = re.compile(
@@ -293,7 +302,7 @@ def _clause_span(text: str, start: int) -> tuple[int, int]:
 
 
 def _is_conditional(clause: str) -> bool:
-    return bool(_PERFORMANCE_RE.search(clause) or _CONDITIONAL_RE.search(clause))
+    return bool(_CONDITIONAL_RE.search(clause))
 
 
 def _is_nonbase(clause: str) -> bool:

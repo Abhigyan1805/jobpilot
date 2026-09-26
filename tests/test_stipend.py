@@ -234,6 +234,7 @@ class GoverningFigureTests(unittest.TestCase):
             "₹30,000/month fixed + incentives",
             "₹30,000/month (fixed) + up to ₹5,000 bonus",
             "Stipend: ₹30,000/month with incentives",
+            "Stipend: ₹30,000/month incentives included",
             "Stipend: 40,000 per month plus incentives",
             "Stipend: ₹30,000/month plus a joining bonus of ₹5,000.",
         ):
@@ -433,6 +434,10 @@ class NegativeFormsTests(unittest.TestCase):
             "This is a paid internship, not an unpaid one. Stipend ₹40,000/month.",
             "Unpaid roles are not offered. Salary: ₹50,000 per month.",
             "We do not offer unpaid internships. Salary ₹40,000 per month.",
+            "We don't offer unpaid internships. Salary ₹40,000 per month.",
+            "This isn't an unpaid role. Salary ₹40,000/month.",
+            "We are no longer offering unpaid internships. Salary ₹40,000/month.",
+            "The internship isn't unpaid. Pay: ₹40,000/month.",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
