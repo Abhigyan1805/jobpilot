@@ -315,6 +315,7 @@ def _add(
     multiplier: int = 1,
     bare: bool = False,
     lump_ok: bool = False,
+    embedded_period: bool = False,
 ) -> None:
     if _overlaps(covered, match.start(), match.end()):
         return
@@ -331,11 +332,13 @@ def _add(
     # parsed value, not the raw token, so a trailing comma ("2015,") is handled.
     if bare and not shorthand and re.fullmatch(r"(?:19|20)\d{2}", number.replace(",", "").strip()):
         return
-    period = _period_after(text, match.end())
-    if period == "other":
-        return
-    if period == "year":
-        kind = "year"
+    period = None
+    if not embedded_period:
+        period = _period_after(text, match.end())
+        if period == "other":
+            return
+        if period == "year":
+            kind = "year"
     # A bare number only counts when its own clause talks about stipends; a
     # number in a neighbouring clause (experience, headcount, a PIN code) is not
     # the stipend and must never drag the governing figure below the floor.
@@ -343,7 +346,9 @@ def _add(
     clause = text[clause_left:clause_right]
     if bare and not _CUE_RE.search(clause):
         return
-    if period is None and _PREPOSED_YEAR_RE.search(text[clause_left:start]):
+    if not embedded_period and period is None and _PREPOSED_YEAR_RE.search(
+        text[clause_left:start]
+    ):
         kind = "year"
     divisor = 1
     if lump_ok and period is None:
@@ -367,6 +372,16 @@ def _add(
     covered.append((match.start(), match.end()))
 
 
+def _is_full_number(number: str) -> bool:
+    """A written-out amount ("25,000"), not the shorthand end of a K range ("25")."""
+    if "," in number:
+        return True
+    try:
+        return float(number) >= 1000
+    except ValueError:
+        return False
+
+
 def _add_range(
     amounts: list[_Amount],
     covered: list[tuple[int, int]],
@@ -376,6 +391,7 @@ def _add_range(
     multiplier: int,
     kind: str,
     value_groups: tuple[int, int] = (1, 2),
+    shorthand_groups: tuple[int | None, int | None] = (None, None),
 ) -> None:
     """Record both ends of a shorthand range whose unit applies to both numbers."""
     if _overlaps(covered, match.start(), match.end()):
@@ -389,9 +405,14 @@ def _add_range(
     clause = text[clause_left:clause_right]
     if period is None and _PREPOSED_YEAR_RE.search(text[clause_left:match.start(value_groups[0])]):
         kind = "year"
-    for group_start in value_groups:
+    for group_start, shorthand_group in zip(value_groups, shorthand_groups):
         number = match.group(group_start)
-        value = _to_int(number, None, multiplier)
+        shorthand = match.group(shorthand_group) if shorthand_group is not None else None
+        # A shorthand end ("30" of "25,000-30k") takes the range's unit; a
+        # written-out end keeps its own value and is never scaled by the other
+        # end's K.
+        scale = multiplier if shorthand or not _is_full_number(number) else 1
+        value = _to_int(number, shorthand, scale)
         if value is None:
             continue
         start, end = match.start(group_start), match.end(group_start)
@@ -416,16 +437,31 @@ def _collect_amounts(text: str) -> list[_Amount]:
     covered: list[tuple[int, int]] = []
     for match in _RANGE_K_RE.finditer(text):
         _add_range(
-            amounts, covered, text, match, multiplier=1000, kind="month", value_groups=(1, 3)
+            amounts,
+            covered,
+            text,
+            match,
+            multiplier=1000,
+            kind="month",
+            value_groups=(1, 3),
+            shorthand_groups=(2, 4),
         )
     for match in _RANGE_LPA_RE.finditer(text):
         _add_range(amounts, covered, text, match, multiplier=100_000, kind="year")
     for match in _MONEY_MONTH_RE.finditer(text):
-        _add(amounts, covered, text, match, kind="month")
+        _add(amounts, covered, text, match, kind="month", embedded_period=True)
     for match in _MONEY_YEAR_RE.finditer(text):
-        _add(amounts, covered, text, match, kind="year")
+        _add(amounts, covered, text, match, kind="year", embedded_period=True)
     for match in _MONEY_LPA_RE.finditer(text):
-        _add(amounts, covered, text, match, kind="year", multiplier=100_000)
+        _add(
+            amounts,
+            covered,
+            text,
+            match,
+            kind="year",
+            multiplier=100_000,
+            embedded_period=True,
+        )
     for match in _MONEY_PREFIX_RE.finditer(text):
         _add(amounts, covered, text, match, kind="month", lump_ok=True)
     for match in _MONEY_SUFFIX_RE.finditer(text):

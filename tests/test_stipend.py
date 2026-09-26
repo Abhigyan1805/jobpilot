@@ -88,6 +88,21 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(monthly.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(monthly.amount, 30000)
 
+    def test_a_period_inside_the_match_is_never_overridden_by_a_trailing_adjective(self):
+        # An embedded "/month" must win over a following "annual <noun>", or a
+        # qualifying posting is silently read as an annual package and dropped.
+        for text in (
+            "Stipend: ₹30,000/month annual contract",
+            "Stipend: ₹30,000/month annual package",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, 30000, text)
+        # An explicit per-annum figure stays annual even with a trailing adjective.
+        per_annum = classify_stipend("Stipend: ₹3,00,000 per annum annual")
+        self.assertEqual(per_annum.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(per_annum.amount, 25000)
+
     def test_k_suffixed_range_is_detected_on_either_end(self):
         both = classify_stipend("Stipend: 30k - 40k /month")
         self.assertEqual(both.state, CONFIRMED_GE_FLOOR)
@@ -98,6 +113,18 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(below.state, CONFIRMED_BELOW_FLOOR)
         self.assertEqual((below.amount, below.amount_high), (10000, 15000))
         self.assertEqual(below.display_label(), "₹10,000-15,000/mo below floor")
+
+    def test_mixed_full_number_and_k_range_does_not_scale_the_full_end(self):
+        # Only the shorthand end carries the K, so a written-out lower bound
+        # keeps its own value: the floor is judged against 25,000, not 30,000.
+        info = classify_stipend("Stipend: 25,000-30k per month")
+        self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual((info.amount, info.amount_high), (25000, 30000))
+        self.assertEqual(info.display_label(), "₹25,000-30,000/mo below floor")
+
+        low = classify_stipend("Stipend: 8,000-10k per month")
+        self.assertEqual((low.amount, low.amount_high), (8000, 10000))
+        self.assertEqual(low.display_label(), "₹8,000-10,000/mo below floor")
 
     def test_floor_is_configurable(self):
         self.assertEqual(classify_stipend("₹25,000/month", floor=20000).state, CONFIRMED_GE_FLOOR)
