@@ -296,6 +296,33 @@ class GoverningFigureTests(unittest.TestCase):
         self.assertEqual(qualifies.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(qualifies.amount, 30000)
 
+    def test_range_period_applies_to_both_ends(self):
+        # The period is stated once, at the range's far end: it must govern the
+        # lower bound too, not just the upper end that carries it.
+        annual = classify_stipend("Stipend: ₹3,00,000-4,00,000 per annum")
+        self.assertEqual(annual.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual((annual.amount, annual.amount_high), (25000, 33333))
+
+        for text in (
+            "Stipend: ₹30,000-40,000 per hour",
+            "Stipend: ₹30,000-40,000 weekly",
+            "Stipend: ₹2,000-3,000 per day",
+            "Stipend: 1,500-2,000/day",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+
+    def test_benefit_word_sharing_a_stipend_clause_does_not_downgrade_it(self):
+        for text, state, amount in (
+            ("Stipend: ₹30,000/month (food and accommodation not included)", CONFIRMED_GE_FLOOR, 30000),
+            ("Stipend: ₹30,000 per month for travel", CONFIRMED_GE_FLOOR, 30000),
+            ("Stipend: ₹10,000 per month (travel allowance extra)", CONFIRMED_BELOW_FLOOR, 10000),
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, state, text)
+            self.assertEqual(info.amount, amount, text)
+
     def test_display_shows_a_range_only_when_one_is_stated(self):
         single = classify_stipend("Stipend: ₹35,000/month; travel allowance 2,000/month")
         self.assertEqual(single.display_label(), "₹35,000/mo confirmed")

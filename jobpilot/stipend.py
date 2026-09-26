@@ -125,6 +125,13 @@ _RANGE_BETWEEN_RE = re.compile(
     r"^\s*[kK]?\s*(?:[-–—]|to|through|till|until)\s*(?:(?:₹|rs\.?|inr|rupees?)\s*)?$",
     re.IGNORECASE,
 )
+#: A range's period is stated once, at its far end ("₹30,000-40,000 per hour").
+#: The lower end carries no period of its own, so it must adopt the range's.
+_RANGE_TAIL_RE = re.compile(
+    r"\s*(?:[-–—]|to|through|till|until)\s*"
+    rf"(?:(?:₹|rs\.?|inr|rupees?)\s*)?{_AMOUNT}",
+    re.IGNORECASE,
+)
 
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(
@@ -275,7 +282,10 @@ def _is_conditional(clause: str) -> bool:
 
 
 def _is_nonbase(clause: str) -> bool:
-    return bool(_NONBASE_RE.search(clause))
+    # A benefit/allowance word only governs the amount when no pay cue shares
+    # its clause: "travel allowance ₹2,000/month" is an allowance, but
+    # "Stipend: ₹30,000 per month for travel" is the stipend itself.
+    return bool(_NONBASE_RE.search(clause)) and not _CUE_RE.search(clause)
 
 
 def _cue_rank(clause: str) -> int:
@@ -303,6 +313,14 @@ def _period_after(text: str, pos: int) -> str | None:
     if unit in _MONTH_UNITS:
         return "month"
     return "other"
+
+
+def _range_period_after(text: str, pos: int) -> str | None:
+    """``_period_after`` at the far end of a range whose connector starts at ``pos``."""
+    match = _RANGE_TAIL_RE.match(text, pos)
+    if match is None:
+        return None
+    return _period_after(text, match.end())
 
 
 def _add(
@@ -335,6 +353,8 @@ def _add(
     period = None
     if not embedded_period:
         period = _period_after(text, match.end())
+        if period is None:
+            period = _range_period_after(text, match.end())
         if period == "other":
             return
         if period == "year":
