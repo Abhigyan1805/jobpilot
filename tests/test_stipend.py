@@ -264,6 +264,23 @@ class GoverningFigureTests(unittest.TestCase):
             self.assertEqual(info.display_label(), label, text)
             self.assertNotIn("-", info.display_label(), text)
 
+    def test_fixed_base_outranks_a_conditional_stipend_figure(self):
+        # The fixed monthly base is the figure the floor applies to; a nearby
+        # performance-qualified "up to" figure must not suppress it.
+        for text, amount in (
+            (
+                "Stipend: up to ₹50,000/month based on performance. Fixed ₹35,000/month.",
+                35000,
+            ),
+            (
+                "Stipend: up to ₹50,000/month based on performance. ₹35,000/month fixed.",
+                35000,
+            ),
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, amount, text)
+
     def test_genuine_sub_floor_monthly_is_dropped(self):
         info = classify_stipend("Stipend: ₹10,000/month")
         self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
@@ -358,19 +375,27 @@ class NegativeFormsTests(unittest.TestCase):
             classify_stipend("Unpaid internship; certificate worth ₹5,000").state, UNPAID
         )
 
-    def test_unpaid_or_conditional_beats_a_package_figure(self):
+    def test_unpaid_or_commission_only_beats_a_package_figure(self):
         # A CTC/annual package figure is not the stipend's own figure and must
-        # never override an explicit unpaid or conditional stipend.
+        # never override an explicit unpaid or commission-only statement.
         for text in (
             "Unpaid internship. CTC ₹6,00,000/annum.",
             "No stipend. Annual package: ₹6,00,000.",
             "Stipend: Unpaid. Salary ₹8,00,000 per annum.",
-            "Stipend: up to ₹15,000/month. CTC ₹6,00,000/annum.",
             "commission only. Salary: 50000 per month",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, UNPAID, text)
             self.assertTrue(info.dropped, text)
+
+    def test_conditional_stipend_is_judged_on_the_stipend_not_the_package(self):
+        # A variable "up to" stipend is below the floor even though the posting
+        # also quotes a large annual package; the package figure must not turn a
+        # below-floor stipend into a confirmed one.
+        info = classify_stipend("Stipend: up to ₹15,000/month. CTC ₹6,00,000/annum.")
+        self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(info.amount, 15000)
+        self.assertTrue(info.dropped)
 
     def test_cue_less_monthly_stipend_beats_an_earlier_package_figure(self):
         # Both figures are cue-less; the monthly rate is the stipend, so a
@@ -383,6 +408,8 @@ class NegativeFormsTests(unittest.TestCase):
         for text in (
             "We do not offer unpaid internships. Stipend: ₹30,000/month.",
             "This is a paid internship, not an unpaid one. Stipend ₹40,000/month.",
+            "Unpaid roles are not offered. Salary: ₹50,000 per month.",
+            "We do not offer unpaid internships. Salary ₹40,000 per month.",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)

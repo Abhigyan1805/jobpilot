@@ -128,17 +128,25 @@ class ExclusionMatchTests(unittest.TestCase):
         self.assertEqual(ExclusionList.load("").count, 0)
         self.assertEqual(ExclusionList.load("/nonexistent/applied.toml").count, 0)
 
-    def test_norm_url_drops_query_and_fragment(self):
+    def test_norm_url_keeps_query_and_drops_fragment(self):
         self.assertEqual(
             _norm_url("https://Unstop.com/x/y/?a=1#frag"),
-            "https://unstop.com/x/y",
+            "https://unstop.com/x/y?a=1",
+        )
+        # Query parameters only differ by order: same posting.
+        self.assertEqual(
+            _norm_url("https://x.com/j?b=2&a=1"),
+            _norm_url("https://x.com/j?a=1&b=2"),
         )
 
 
 class ShippedListTests(unittest.TestCase):
-    def test_shipped_list_has_the_45_applied_postings(self):
+    def _entries(self) -> ExclusionList:
         path = Path(__file__).resolve().parent.parent / "data" / "applied-postings.toml"
-        entries = ExclusionList.load(path)
+        return ExclusionList.load(path)
+
+    def test_shipped_list_has_the_45_applied_postings(self):
+        entries = self._entries()
         self.assertEqual(entries.count, 45)
         # A known member of the page is excluded by its url on re-discovery.
         p = posting(source="unstop", job_id="99")
@@ -148,6 +156,23 @@ class ShippedListTests(unittest.TestCase):
         other = posting(source="unstop", job_id="100")
         other.url = "https://www.rubrik.com/company/careers/departments/job.9999999"
         self.assertIsNone(entries.match(other))
+
+    def test_stripe_job_identity_in_the_query_is_not_flattened(self):
+        # The shipped Stripe entry carries its job id in the query string. The
+        # exact stored url is excluded, but a brand-new Stripe posting with a
+        # different gh_jid (or none) is a new posting, not the old one.
+        entries = self._entries()
+        exact = posting(source="greenhouse", job_id="8031833")
+        exact.url = "https://stripe.com/jobs/search?gh_jid=8031833"
+        self.assertIsNotNone(entries.match(exact))
+
+        new_id = posting(source="greenhouse", job_id="9999999")
+        new_id.url = "https://stripe.com/jobs/search?gh_jid=9999999"
+        self.assertIsNone(entries.match(new_id))
+
+        no_query = posting(source="greenhouse", job_id="8888888")
+        no_query.url = "https://stripe.com/jobs/search"
+        self.assertIsNone(entries.match(no_query))
 
 
 class SelectionExclusionTests(unittest.TestCase):

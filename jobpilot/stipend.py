@@ -145,6 +145,25 @@ _UNPAID_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: A negated "unpaid" is not a statement that the role is unpaid: "we do not
+#: offer unpaid internships", "not an unpaid one", "unpaid roles are not
+#: offered". Such a negation must not override a real confirmed figure.
+_UNPAID_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|isn'?t|aren'?t|wasn'?t|weren'?t|don'?t|doesn'?t|didn'?t|won'?t|can'?t|cannot)\b"
+    r"[^.;|\n]{0,40}?\bunpaid\b"
+    r"|\bunpaid\b[^.;|\n]{0,40}?\b(?:is|are|will\s+be|would\s+be|was|were)?\s*not\s+"
+    r"(?:offered|available|provided|accepted|hiring|hired)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_unpaid_signal(text: str) -> bool:
+    """True when the text claims the role is unpaid, ignoring a negated mention."""
+    if not _UNPAID_RE.search(text):
+        return False
+    return bool(_UNPAID_RE.search(_UNPAID_NEGATION_RE.sub(" ", text)))
+
+
 #: Pay that exists but is not a fixed monthly figure.
 _PERFORMANCE_RE = re.compile(
     r"performance[\s-]?based"
@@ -201,10 +220,6 @@ class StipendInfo:
     state: str = UNSTATED
     amount: int | None = None
     amount_high: int | None = None
-
-    @property
-    def confirmed(self) -> bool:
-        return self.state in (CONFIRMED_GE_FLOOR, CONFIRMED_BELOW_FLOOR)
 
     @property
     def dropped(self) -> bool:
@@ -520,31 +535,36 @@ def classify_stipend(
     """
     text = text or ""
     amounts = _collect_amounts(text)
-    unpaid_signal = bool(_UNPAID_RE.search(text))
+    unpaid_signal = _has_unpaid_signal(text)
     performance_signal = bool(_PERFORMANCE_RE.search(text))
 
-    # Judge the floor against the posting's governing stipend figure - the base
-    # amount carrying the strongest pay cue. A conditional or non-base amount at
-    # that same cue rank *is* the governing evidence, so a weaker cue-less
-    # package figure (a CTC/annual salary) must not confirm the floor. An
-    # explicit unpaid statement is overridden only by a figure tied to the
-    # stipend itself, never by a broader salary/package figure.
+    # Judge the floor against the posting's governing stipend figure: the fixed
+    # base amount carrying the strongest pay cue. A conditional or non-base
+    # amount never outranks a fixed base, so an explicitly stated fixed monthly
+    # figure stays confirmed even when a nearby "up to"/performance/incentive
+    # mention shares the posting.
     base = [a for a in amounts if a.is_base]
     if base:
-        top_rank = max(a.cue_rank for a in amounts)
-        governing = [a for a in base if a.cue_rank == top_rank]
-        if unpaid_signal and top_rank < 2:
-            governing = []
-        if governing:
-            if top_rank == 0:
-                monthly = [a for a in governing if a.kind == "month"]
-                if monthly:
-                    governing = monthly
+        base_rank = max(a.cue_rank for a in base)
+        governing = [a for a in base if a.cue_rank == base_rank]
+        if base_rank == 0:
+            monthly = [a for a in governing if a.kind == "month"]
+            if monthly:
+                governing = monthly
+            else:
+                # A cue-less annual package yields to a monthly figure tied to a
+                # stipend cue, so "up to ₹15,000/month. CTC ₹6,00,000/annum." is
+                # judged on the stipend, never on the unseen package.
+                cued_monthly = [
+                    a for a in amounts if a.kind == "month" and a.cue_rank > 0
+                ]
+                if cued_monthly:
+                    governing = cued_monthly
+        # An explicit unpaid statement is overridden only by a figure tied to the
+        # stipend itself (a stipend/remuneration cue), never by a broader salary
+        # or package figure.
+        if not (unpaid_signal and base_rank < 2):
             return _confirmed(text, governing, floor)
-        if any(
-            not a.is_base and a.cue_rank == top_rank and a.conditional for a in amounts
-        ):
-            return StipendInfo(state=UNPAID)
 
     if unpaid_signal:
         return StipendInfo(state=UNPAID)

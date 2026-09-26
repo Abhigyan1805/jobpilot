@@ -9,7 +9,9 @@ Entries are matched by *identity only*, the way a re-discovery of the exact same
 posting would be, so the list keeps working across runs without hiding a
 genuinely new posting that shares a company and a generic title:
 
-* on ``url`` (scheme/host/case/trailing-slash/query-normalised), and
+* on ``url`` (scheme/host/case/trailing-slash normalised; the query string is
+  kept, with its parameters order-normalised, because some boards carry the job
+  identity in the query and dropping it would hide a genuinely new posting), and
 * exactly on a supplied ``stable_id`` or ``source`` + ``job_id``.
 
 An entry with neither a url nor a source/job id matches nothing; there is no
@@ -36,7 +38,8 @@ def _norm_url(value) -> str:
     if parts.scheme or parts.netloc:
         host = parts.netloc.casefold()
         path = parts.path.rstrip("/").casefold()
-        return urlunsplit((parts.scheme.casefold(), host, path, "", ""))
+        query = "&".join(sorted(parts.query.split("&"))) if parts.query else ""
+        return urlunsplit((parts.scheme.casefold(), host, path, query, ""))
     return text.rstrip("/").casefold()
 
 
