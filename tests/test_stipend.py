@@ -167,6 +167,39 @@ class ParseFormsTests(unittest.TestCase):
             self.assertEqual(classify_stipend(text).state, UNSTATED, text)
             self.assertFalse(classify_stipend(text).dropped, text)
 
+    def test_clock_times_are_not_read_as_monthly_stipends(self):
+        # A bare "N PM" is a clock time, not a monthly amount: it must not be
+        # invented into a stipend that then fails and drops the posting.
+        for text in (
+            "Working Hours: 11 AM - 6 PM",
+            "Application deadline: 5th March 2024 - 11:59 PM",
+            "Shift: 2 PM to 11 PM",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+
+    def test_foreign_currency_amounts_are_not_read_as_inr(self):
+        # A non-INR figure is not an INR amount: it is unstated, never confirmed,
+        # never displayed as rupees and never dropped.
+        for text in (
+            "The salary range for this role is 37,000 USD - 82,000 USD.",
+            "$46,800.00 - $84,600.00",
+            "Salary: 20,000 USD - 30,000 USD",
+            "$22-$25/hr",
+            "Stipend: €40,000 per month",
+            "Stipend: 40000 GBP",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+            self.assertIsNone(info.amount, text)
+
+    def test_inr_figure_survives_a_nearby_foreign_currency(self):
+        info = classify_stipend("Stipend: ₹35,000/month. Bonus $5,000.")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(info.amount, 35000)
+
     def test_annual_figures_are_not_mangled(self):
         per_annum = classify_stipend("₹6,00,000 per annum")
         self.assertEqual(per_annum.state, CONFIRMED_GE_FLOOR)
@@ -396,15 +429,21 @@ class NegativeFormsTests(unittest.TestCase):
         ):
             self.assertEqual(classify_stipend(text).state, UNPAID, text)
 
-    def test_performance_and_commission_only(self):
+    def test_performance_only_is_unstated_and_commission_only_is_unpaid(self):
+        # A performance/incentive qualifier with no fixed figure states no
+        # amount, so it is unknown and surfaced - never dropped as unpaid.
         for text in (
             "Performance-Based Stipend",
             "Stipend: Performance-based",
             "The stipend is based on performance.",
-            "commission only",
             "Fixed+Performance based stipend",
+            "Machine learning internship. Potential for full-time offer based on performance.",
+            "Extension of internship based on performance.",
         ):
-            self.assertEqual(classify_stipend(text).state, UNPAID, text)
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+        self.assertEqual(classify_stipend("commission only").state, UNPAID)
 
     def test_unpaid_beats_a_stray_figure(self):
         self.assertEqual(

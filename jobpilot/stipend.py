@@ -22,12 +22,16 @@ Assumptions (explicit):
   not the minimum of every number in the text. A headcount, a benefit valued at
   an amount, a one-time bonus or an allowance is not the stipend base and never
   drags a qualifying figure below the floor.
-* ``unpaid`` covers the clearly non-fixed forms (``Unpaid``,
-  ``Performance-based``, ``commission only``, ``no fixed stipend``). A posting
-  that merely *mentions* a stipend without a figure (``Stipend:``,
-  ``stipend will be provided``, ``stipend is negotiable``) is ``unstated`` and,
-  per the captain's choice, is surfaced in a separate section instead of being
+* ``unpaid`` covers only the explicit non-fixed forms (``Unpaid``,
+  ``no stipend``, ``not paid``, ``commission only``). A posting that merely
+  *mentions* a stipend, conditions it on performance, or quotes an ``up to``
+  cap without a fixed figure (``Stipend:``, ``stipend will be provided``,
+  ``based on performance``, ``up to ₹50,000/month``) is ``unstated`` and, per
+  the captain's choice, is surfaced in a separate section instead of being
   dropped - a missing amount is never invented and never silently fails.
+* A figure quoted in a foreign currency (``$``/``USD``/``EUR``/...) is not an
+  INR amount: it is left ``unstated`` rather than judged against the ₹ floor
+  or displayed as rupees.
 
 Nothing here scores, ranks or invents: it only classifies text.
 """
@@ -41,7 +45,7 @@ from dataclasses import dataclass
 CONFIRMED_GE_FLOOR = "confirmed_ge_floor"
 #: Confirmed monthly amount below the floor: dropped.
 CONFIRMED_BELOW_FLOOR = "confirmed_below_floor"
-#: No fixed/paid stipend (explicitly unpaid or performance/commission only): dropped.
+#: No fixed/paid stipend (explicitly unpaid or commission only): dropped.
 UNPAID = "unpaid"
 #: A stipend is mentioned or absent but no figure is stated: shown separately.
 UNSTATED = "unstated"
@@ -54,7 +58,7 @@ DROPPED_STATES = frozenset({CONFIRMED_BELOW_FLOOR, UNPAID})
 #: The parser recognises only the INR surface forms (``₹``/``Rs``/``INR``/
 #: ``rupees``); a foreign-currency figure is never invented into rupees.
 _CURRENCY = r"(?:₹|rs\.?|inr|rupees?)"
-_MONTH_PERIOD = r"(?:per\s+month|/\s*months?\b|/\s*mo\b|monthly|p\.?m\.?\b|a\s+month|pcm)"
+_MONTH_PERIOD = r"(?:per\s+month|/\s*months?\b|/\s*mo\b|monthly|a\s+month|pcm)"
 _YEAR_PERIOD = r"(?:per\s+(?:year|annum)|/\s*(?:year|annum)|yearly|annually)"
 # LPA / "lakhs per annum" is an annual figure whose number is counted in lakhs.
 _LPA_PERIOD = r"(?:lpa|lakhs?\s+(?:per\s+annum|p\.?a)|lakhs?\s*/\s*(?:year|annum))"
@@ -138,6 +142,35 @@ _RANGE_TAIL_RE = re.compile(
 #: package, so it is divided by twelve.
 _LAKH_UNITS = frozenset({"l", "lac", "lacs", "lakh", "lakhs"})
 
+#: Non-INR currency surface forms. The parser is INR-only, so an amount quoted
+#: in one of these is not an INR figure and must never be judged against the
+#: rupee floor or displayed as rupees.
+_FOREIGN_SYMBOLS = frozenset("$£€¥₽₩")
+_FOREIGN_CODES = frozenset(
+    {
+        "usd", "eur", "gbp", "aud", "cad", "sgd", "aed", "chf", "jpy", "cny",
+        "dollar", "dollars", "euro", "euros", "pound", "pounds", "dirham",
+        "dirhams", "yen", "yuan", "rmb",
+    }
+)
+
+
+def _foreign_currency_adjacent(text: str, start: int, end: int) -> bool:
+    """True when the amount spanning ``[start, end)`` is quoted in a foreign currency."""
+    before = text[:start].rstrip()
+    if before and before[-1] in _FOREIGN_SYMBOLS:
+        return True
+    word = re.search(r"([A-Za-z]+)\s*$", before)
+    if word is not None and word.group(1).casefold() in _FOREIGN_CODES:
+        return True
+    after = text[end:].lstrip()
+    if after[:1] in _FOREIGN_SYMBOLS:
+        return True
+    code = re.match(r"([A-Za-z]+)", after)
+    if code is not None and code.group(1).casefold() in _FOREIGN_CODES:
+        return True
+    return False
+
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(
     r"\bunpaid\b"
@@ -177,11 +210,6 @@ _PERFORMANCE_QUALIFIER = (
     r"|based\s+on\s+performance"
     r"|\bperformance\s+stipend\b"
     r"|\bvariable\s+(?:stipend|pay|component)\b"
-)
-#: Pay that exists but is not a fixed monthly figure.
-_PERFORMANCE_RE = re.compile(
-    rf"{_PERFORMANCE_QUALIFIER}|\bincentiv(?:e|es)\b",
-    re.IGNORECASE,
 )
 #: Qualifiers that make the amount they attach to conditional. A bare
 #: "incentives" mention is an add-on component, not a condition on the base, so
@@ -388,6 +416,8 @@ def _add(
     if value is None:
         return
     start, end = match.start(1), match.end(1)
+    if _foreign_currency_adjacent(text, start, end):
+        return
     if _DURATION_AFTER_RE.match(text, end):
         return
     # A *bare* four-digit year near a stipend is not a stipend; an explicit
@@ -464,6 +494,8 @@ def _add_range(
 ) -> None:
     """Record both ends of a shorthand range whose unit applies to both numbers."""
     if _overlaps(covered, match.start(), match.end()):
+        return
+    if _foreign_currency_adjacent(text, match.start(), match.end()):
         return
     period = _period_after(text, match.end())
     if period == "other":
@@ -572,7 +604,6 @@ def classify_stipend(
     text = text or ""
     amounts = _collect_amounts(text)
     unpaid_signal = _has_unpaid_signal(text)
-    performance_signal = bool(_PERFORMANCE_RE.search(text))
 
     # Judge the floor against the posting's governing stipend figure: the fixed
     # base amount carrying the strongest pay cue. A conditional or non-base
@@ -603,9 +634,5 @@ def classify_stipend(
             return _confirmed(text, governing, floor)
 
     if unpaid_signal:
-        return StipendInfo(state=UNPAID)
-    if amounts and all(a.conditional for a in amounts):
-        return StipendInfo(state=UNSTATED)
-    if performance_signal:
         return StipendInfo(state=UNPAID)
     return _unstated()
