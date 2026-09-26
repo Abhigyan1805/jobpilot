@@ -7,7 +7,10 @@ from jobpilot.models import SubmissionResult
 from jobpilot.store import Store
 from tests.helpers import FakeAdapter, plan_for, posting, test_config
 
-IN_WINDOW = "Machine learning internship, January 2026 - June 2026. Python, RAG."
+IN_WINDOW = (
+    "Machine learning internship, January 2026 - June 2026. Python, RAG. "
+    "Stipend: ₹40,000/month."
+)
 
 
 class FlakyAdapter(FakeAdapter):

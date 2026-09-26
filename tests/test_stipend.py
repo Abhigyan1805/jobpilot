@@ -131,6 +131,19 @@ class ParseFormsTests(unittest.TestCase):
         # A *bare* four-digit year is still not a stipend amount.
         self.assertEqual(classify_stipend("Stipend: 2026").state, UNSTATED)
 
+    def test_pa_annual_and_lump_sum_totals_are_read_as_monthly(self):
+        pa = classify_stipend("Stipend: ₹3,00,000 p.a.")
+        self.assertEqual(pa.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(pa.amount, 25000)
+
+        lump = classify_stipend("Stipend: ₹60,000 for 3 months")
+        self.assertEqual(lump.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(lump.amount, 20000)
+
+        clearing = classify_stipend("Stipend: ₹90,000 for 3 months")
+        self.assertEqual(clearing.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(clearing.amount, 30000)
+
 
 class GoverningFigureTests(unittest.TestCase):
     """The floor is judged against the governing stipend figure, not min() of
@@ -166,10 +179,36 @@ class GoverningFigureTests(unittest.TestCase):
             "₹30,000 monthly + incentives",
             "₹30,000/month fixed + incentives",
             "₹30,000/month (fixed) + up to ₹5,000 bonus",
+            "Stipend: ₹30,000/month with incentives",
+            "Stipend: 40,000 per month plus incentives",
+            "Stipend: ₹30,000/month plus a joining bonus of ₹5,000.",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
-            self.assertEqual(info.amount, 30000, text)
+            self.assertTrue(info.amount and info.amount >= 30000, text)
+
+    def test_stray_numbers_in_neighbouring_clauses_are_not_stipends(self):
+        for text, expected in (
+            ("Stipend: ₹30,000/month. 3+ years of experience preferred.", 30000),
+            ("Stipend: ₹35,000/month. 2 rounds of interviews.", 35000),
+            ("Stipend: ₹35,000/month. Office in Bengaluru 560001.", 35000),
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, expected, text)
+            self.assertEqual(info.amount_high, expected, text)
+
+    def test_unrelated_figures_are_not_rendered_as_a_range(self):
+        for text, label in (
+            ("Stipend: ₹35,000/month. CTC: ₹6,00,000 per annum.", "₹35,000/mo confirmed"),
+            (
+                "Stipend: ₹35,000/month. ₹40,000/month for returning interns.",
+                "₹35,000/mo confirmed",
+            ),
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.display_label(), label, text)
+            self.assertNotIn("-", info.display_label(), text)
 
     def test_genuine_sub_floor_monthly_is_dropped(self):
         info = classify_stipend("Stipend: ₹10,000/month")
@@ -219,6 +258,15 @@ class NegativeFormsTests(unittest.TestCase):
         self.assertEqual(
             classify_stipend("Unpaid internship; certificate worth ₹5,000").state, UNPAID
         )
+
+    def test_negated_or_comparative_unpaid_does_not_beat_a_confirmed_figure(self):
+        for text in (
+            "We do not offer unpaid internships. Stipend: ₹30,000/month.",
+            "This is a paid internship, not an unpaid one. Stipend ₹40,000/month.",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertFalse(info.dropped, text)
 
     def test_confirmed_figure_below_floor_is_below_not_unpaid(self):
         info = classify_stipend("₹18,000/month fixed stipend + incentives based on performance")

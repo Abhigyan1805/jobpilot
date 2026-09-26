@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from jobpilot.models import CheckResult, FilterResult, JobPosting
 from jobpilot.openstate import assess_open_state
-from jobpilot.stipend import DROPPED_STATES, classify_stipend
+from jobpilot.stipend import DROPPED_STATES, UNSTATED, classify_stipend
 from jobpilot.window import WindowInfo, classify_window
 
 # Countries/regions that, if the only location named, mean onsite work there.
@@ -232,10 +232,10 @@ def assess_location(posting: JobPosting, cfg) -> LocationAssessment:
 def review_only_reasons(posting: JobPosting, cfg) -> list[str]:
     """Reasons ambiguous postings must be human-reviewed before auto-applying.
 
-    A work-authorization restriction, or a full-time cue that clashes with an
-    internship signal, is too uncertain to auto-apply on but too weak to
-    discard: the posting stays in the pipeline for scoring and goes to the
-    review queue.
+    A work-authorization restriction, a full-time cue that clashes with an
+    internship signal, or a stipend with no stated figure is too uncertain to
+    auto-apply on but too weak to discard: the posting stays in the pipeline
+    for scoring and goes to the review queue.
     """
     reasons: list[str] = []
     loc = assess_location(posting, cfg)
@@ -244,6 +244,10 @@ def review_only_reasons(posting: JobPosting, cfg) -> list[str]:
     ft = fulltime_check(posting, cfg)
     if ft.review_only:
         reasons.append(ft.detail)
+    text = " ".join(p for p in [posting.description, posting.salary] if p)
+    info = classify_stipend(text, floor=int(getattr(cfg, "stipend_floor", 30000)))
+    if info.state == UNSTATED:
+        reasons.append("stipend not stated; verify before applying")
     return reasons
 
 
