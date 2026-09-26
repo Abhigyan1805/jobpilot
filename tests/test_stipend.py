@@ -8,7 +8,9 @@ negatives are unpaid, and a stipend mentioned without a figure is ``unstated``
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from jobpilot.stipend import (
     CONFIRMED_BELOW_FLOOR,
@@ -17,6 +19,8 @@ from jobpilot.stipend import (
     UNSTATED,
     classify_stipend,
 )
+from jobpilot.store import Store
+from tests.helpers import posting
 
 
 class ParseFormsTests(unittest.TestCase):
@@ -80,14 +84,34 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual((info.amount, info.amount_high), (40000, 50000))
 
     def test_non_monthly_period_is_not_read_as_monthly(self):
-        # An hourly/weekly rate must never clear (or fail) the monthly floor.
-        for text in ("₹45,000 per hour", "Stipend: ₹45,000 per hour"):
+        # An hourly/weekly/daily rate must never clear (or fail) the monthly floor.
+        for text in (
+            "₹45,000 per hour",
+            "Stipend: ₹45,000 per hour",
+            "₹30,000 hourly",
+            "₹30,000 weekly",
+            "₹30,000 daily",
+            "₹30,000 an hour",
+            "Stipend: ₹30,000 per-hour",
+            "Stipend: ₹30,000/hr",
+            "₹500 hourly",
+            "₹10,000 an hour",
+        ):
             info = classify_stipend(text)
             self.assertNotEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.state, UNSTATED, text)
             self.assertFalse(info.dropped, text)
         weekly = classify_stipend("Stipend: ₹10,000/week")
         self.assertFalse(weekly.dropped)
         self.assertNotEqual(weekly.state, CONFIRMED_GE_FLOOR)
+
+    def test_bare_year_with_trailing_comma_is_not_a_stipend(self):
+        for text in (
+            "Founded in 2015, our interns get a stipend.",
+            "Established in 2020, the stipend is provided after training.",
+        ):
+            self.assertEqual(classify_stipend(text).state, UNSTATED, text)
+            self.assertFalse(classify_stipend(text).dropped, text)
 
     def test_annual_figures_are_not_mangled(self):
         per_annum = classify_stipend("₹6,00,000 per annum")
@@ -106,6 +130,68 @@ class ParseFormsTests(unittest.TestCase):
             self.assertEqual(info.amount, 2000, text)
         # A *bare* four-digit year is still not a stipend amount.
         self.assertEqual(classify_stipend("Stipend: 2026").state, UNSTATED)
+
+
+class GoverningFigureTests(unittest.TestCase):
+    """The floor is judged against the governing stipend figure, not min() of
+    every number: headcount, a benefit's worth, a one-time bonus and an
+    allowance are not the base and must not drag a qualifying figure down."""
+
+    def test_base_monthly_plus_smaller_one_time_bonus_qualifies(self):
+        info = classify_stipend("Stipend: ₹30,000/month + a one-time ₹5,000 bonus")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(info.amount, 30000)
+        self.assertEqual(info.amount_high, 30000)
+
+    def test_base_monthly_plus_smaller_recurring_allowance_qualifies(self):
+        info = classify_stipend("Stipend: ₹35,000/month; travel allowance 2,000/month")
+        self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(info.amount, 35000)
+        self.assertEqual(info.amount_high, 35000)
+
+    def test_headcount_and_benefit_worth_do_not_drag_the_base(self):
+        headcount = classify_stipend("Stipend: ₹40,000/month. We have 40 employees.")
+        self.assertEqual(headcount.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(headcount.amount, 40000)
+
+        benefit = classify_stipend(
+            "Stipend: ₹35,000/month. Training worth ₹10,000 provided."
+        )
+        self.assertEqual(benefit.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(benefit.amount, 35000)
+
+    def test_fixed_figure_with_incentives_stays_confirmed(self):
+        for text in (
+            "Stipend: ₹30,000/month + incentives",
+            "₹30,000 monthly + incentives",
+            "₹30,000/month fixed + incentives",
+            "₹30,000/month (fixed) + up to ₹5,000 bonus",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, 30000, text)
+
+    def test_genuine_sub_floor_monthly_is_dropped(self):
+        info = classify_stipend("Stipend: ₹10,000/month")
+        self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
+        self.assertTrue(info.dropped)
+
+    def test_range_lower_bound_semantics_are_kept(self):
+        below = classify_stipend("Stipend: ₹25,000-35,000/month")
+        self.assertEqual(below.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(below.amount, 25000)
+
+        qualifies = classify_stipend("Stipend: ₹30,000-40,000/month")
+        self.assertEqual(qualifies.state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(qualifies.amount, 30000)
+
+    def test_display_shows_a_range_only_when_one_is_stated(self):
+        single = classify_stipend("Stipend: ₹35,000/month; travel allowance 2,000/month")
+        self.assertEqual(single.display_label(), "₹35,000/mo confirmed")
+        self.assertNotIn("-", single.display_label())
+
+        ranged = classify_stipend("Stipend: ₹30,000-40,000/month")
+        self.assertEqual(ranged.display_label(), "₹30,000-40,000/mo confirmed")
 
 
 class NegativeFormsTests(unittest.TestCase):
@@ -172,6 +258,41 @@ class DisplayTests(unittest.TestCase):
         self.assertTrue(classify_stipend("₹10,000/month").dropped)
         self.assertFalse(classify_stipend("₹30,000/month").dropped)
         self.assertFalse(classify_stipend("no figure here").dropped)
+
+
+class StipendStateIsNotPersistedTests(unittest.TestCase):
+    """Stipend state has one definition: it is computed where it is used, so the
+    postings schema must not carry a second, write-only copy of it."""
+
+    def test_fresh_store_has_no_stipend_state_columns(self):
+        store = Store(":memory:")
+        try:
+            columns = {row["name"] for row in store.conn.execute("PRAGMA table_info(postings)")}
+            self.assertNotIn("stipend_state", columns)
+            self.assertNotIn("stipend_amount", columns)
+            p = posting(job_id="no-stipend-cols", title="Machine Learning Intern")
+            store.upsert_posting(p, eligible=True)
+            self.assertEqual(store.get_posting(p.stable_id)["title"], p.title)
+        finally:
+            store.close()
+
+    def test_existing_db_with_old_stipend_columns_still_opens_and_upserts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "jobpilot.db"
+            store = Store(db)
+            # Simulate a DB written by the earlier revision that added them.
+            store.conn.execute("ALTER TABLE postings ADD COLUMN stipend_state TEXT")
+            store.conn.execute("ALTER TABLE postings ADD COLUMN stipend_amount INTEGER")
+            store.conn.commit()
+            store.close()
+
+            store = Store(db)  # migration must not crash on the pre-existing columns
+            try:
+                p = posting(job_id="old-db", title="Machine Learning Intern")
+                store.upsert_posting(p, eligible=True)
+                self.assertEqual(store.get_posting(p.stable_id)["title"], p.title)
+            finally:
+                store.close()
 
 
 if __name__ == "__main__":

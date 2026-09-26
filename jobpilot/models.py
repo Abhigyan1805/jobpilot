@@ -30,11 +30,6 @@ class JobPosting:
     #: Number of applicants a board reports (``registerCount`` on Unstop), or 0
     #: when unknown. Shown as a warning on the review page; never a hard cutoff.
     applicants: int = 0
-    #: Stipend classification (see ``jobpilot.stipend``): ``confirmed_ge_floor``,
-    #: ``confirmed_below_floor``, ``unpaid`` or ``unstated``, with the confirmed
-    #: monthly figure when there is one. Set by the hard filter.
-    stipend_state: str = ""
-    stipend_amount: int = 0
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property

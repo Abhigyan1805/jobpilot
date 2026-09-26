@@ -140,8 +140,6 @@ def _posting_from_row(row) -> JobPosting:
         published_at=row["published_at"] or "",
         is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
         applicants=(int(row["applicants"] or 0) if "applicants" in row.keys() else 0),
-        stipend_state=(row["stipend_state"] or "" if "stipend_state" in row.keys() else ""),
-        stipend_amount=(int(row["stipend_amount"] or 0) if "stipend_amount" in row.keys() else 0),
     )
 
 

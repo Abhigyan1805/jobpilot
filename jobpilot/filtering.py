@@ -291,15 +291,14 @@ def stipend_check(posting: JobPosting, cfg) -> CheckResult:
     ``confirmed_below_floor`` and ``unpaid`` postings are rejected (dropped);
     a confirmed amount at/above the floor passes, and a posting whose stipend is
     not stated passes too so it can be surfaced separately for verification.
-    The parsed enum is attached to the posting for presentation.
+    The state is computed where it is used (here and in ``present``); it is not
+    persisted, so there is a single definition of it.
     """
     text = " ".join(p for p in [posting.description, posting.salary] if p)
     info = classify_stipend(
         text,
         floor=int(getattr(cfg, "stipend_floor", 30000)),
     )
-    posting.stipend_state = info.state
-    posting.stipend_amount = info.amount or 0
     if info.state in DROPPED_STATES:
         return CheckResult("stipend", False, info.display_label(), 0.0)
     score = 1.0 if info.amount else 0.5

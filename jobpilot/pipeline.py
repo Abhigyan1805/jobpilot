@@ -583,8 +583,6 @@ def _postings_from_store(store: Store) -> list[JobPosting]:
             deadline=row["deadline"] or "",
             is_remote=None if row["is_remote"] is None else bool(row["is_remote"]),
             applicants=int(row["applicants"] or 0),
-            stipend_state=row["stipend_state"] or "",
-            stipend_amount=int(row["stipend_amount"] or 0),
         )
         for row in rows
     ]

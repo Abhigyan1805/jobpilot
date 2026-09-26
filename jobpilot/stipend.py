@@ -16,7 +16,12 @@ Assumptions (explicit):
   any other explicit period (per day/week/hour) cannot confirm a monthly floor
   and is left ``unstated`` rather than guessed at.
 * A range is judged by its *lower* bound, so ``₹25,000-35,000`` does not clear a
-  ₹30,000 floor. The upper bound is kept only for display.
+  ₹30,000 floor. The upper bound is kept only for display, and a range is shown
+  only when the text actually states one.
+* The floor is judged against the posting's *governing* monthly stipend figure,
+  not the minimum of every number in the text. A headcount, a benefit valued at
+  an amount, a one-time bonus or an allowance is not the stipend base and never
+  drags a qualifying figure below the floor.
 * ``unpaid`` covers the clearly non-fixed forms (``Unpaid``,
   ``Performance-based``, ``commission only``, ``no fixed stipend``). A posting
   that merely *mentions* a stipend without a figure (``Stipend:``,
@@ -85,11 +90,12 @@ _DURATION_AFTER_RE = re.compile(
 
 #: An explicit period after a figure decides whether it can be read as monthly.
 #: Month/year slash forms are already consumed by the money patterns; this
-#: catches a postposed ``per day``/``/week``/``a hour`` so a non-monthly rate is
-#: never silently treated as a floor-clearing monthly amount.
+#: catches a postposed ``per day``/``/week``/``an hour`` and the adverb and
+#: abbreviation surface forms (``hourly``/``hr``/``wk``), so a non-monthly rate
+#: is never silently treated as a floor-clearing monthly amount.
 _AFTER_PERIOD_RE = re.compile(
-    r"\s*(?:/-)?\s*(?:(?:per\s+|/\s*|a\s+)(?P<unit>months?|years?|annum|weeks?|days?|hours?)"
-    r"|(?P<word>monthly|yearly|annually))\b",
+    r"\s*(?:/-)?\s*(?:(?:per[-\s]+|/\s*|a\s+|an\s+)(?P<unit>months?|years?|annum|weeks?|days?|hours?|hrs?|wk|wks)"
+    r"|(?P<word>monthly|yearly|annually|hourly|daily|weekly|fortnightly))\b",
     re.IGNORECASE,
 )
 _YEAR_UNITS = frozenset({"year", "years", "annum", "yearly", "annually"})
@@ -124,8 +130,26 @@ _CUE_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: A figure in one of these contexts is not the stipend *base* and must never
+#: drag a qualifying base below the floor: a headcount ("40 employees"), a
+#: benefit valued at an amount ("training worth ₹10,000"), a one-time bonus, or
+#: an allowance/reimbursement element.
+_NONBASE_RE = re.compile(
+    r"\b(?:employees?|staff|headcount|members?|people|clients?|customers?|users?)\b"
+    r"|\bone[\s-]?time\b|\bone[\s-]?off\b|\bbonus\b|\ballowance\b|\breimburs\w*"
+    r"|\bincentiv\w*|\bperks?\b|\bbene(?:fit|fits)\b|\bworth\b|\bvoucher\b"
+    r"|\bprize\b|\baward\b|\bscholarship\b|\bfees?\b|\btuition\b"
+    r"|\brelocation\b|\btravel\b|\bfood\b|\bmeals?\b|\baccommodation\b"
+    r"|\binternet\b|\bcertificate\b",
+    re.IGNORECASE,
+)
+
+#: Clause boundaries for context detection. A comma between digits is part of a
+#: number ("15,000") and never splits; sentence punctuation only splits when
+#: followed by whitespace so "Rs. 25,000" and "1.5K" stay whole.
+_CLAUSE_BOUNDARY_RE = re.compile(r"[+;|\n]|(?<!\d),(?!\d)|(?<=[.!?])\s+")
+
 _CUE_WINDOW = 60
-_CONDITIONAL_WINDOW = 25
 
 
 @dataclass(frozen=True)
@@ -186,10 +210,16 @@ class _Amount:
     value: int
     kind: str = "month"  # "month" or "year"
     conditional: bool = False
+    nonbase: bool = False
 
     @property
     def monthly(self) -> int:
         return self.value // 12 if self.kind == "year" else self.value
+
+    @property
+    def is_base(self) -> bool:
+        """A candidate for the posting's governing stipend figure."""
+        return not self.conditional and not self.nonbase
 
 
 def _has_cue(text: str, pos: int) -> bool:
@@ -197,9 +227,22 @@ def _has_cue(text: str, pos: int) -> bool:
     return bool(_CUE_RE.search(window))
 
 
-def _is_conditional(text: str, start: int, end: int) -> bool:
-    window = text[max(0, start - _CONDITIONAL_WINDOW): end + _CONDITIONAL_WINDOW]
-    return bool(_PERFORMANCE_RE.search(window) or _CONDITIONAL_RE.search(window))
+def _clause_at(text: str, start: int) -> str:
+    """The clause (bounded by ``+``/``;``/``|``/newline/sentence/comma) around ``start``."""
+    left = 0
+    for boundary in _CLAUSE_BOUNDARY_RE.finditer(text, 0, start):
+        left = boundary.end()
+    following = _CLAUSE_BOUNDARY_RE.search(text, start)
+    right = following.start() if following is not None else len(text)
+    return text[left:right]
+
+
+def _is_conditional(clause: str) -> bool:
+    return bool(_PERFORMANCE_RE.search(clause) or _CONDITIONAL_RE.search(clause))
+
+
+def _is_nonbase(clause: str) -> bool:
+    return bool(_NONBASE_RE.search(clause))
 
 
 def _overlaps(covered: list[tuple[int, int]], start: int, end: int) -> bool:
@@ -240,21 +283,24 @@ def _add(
     if _DURATION_AFTER_RE.match(text, end):
         return
     # A *bare* four-digit year near a stipend is not a stipend; an explicit
-    # currency/period/prefixed amount is never discarded this way.
-    if bare and not shorthand and "," not in number and re.fullmatch(r"(?:19|20)\d{2}", number):
+    # currency/period/prefixed amount is never discarded this way. Guard on the
+    # parsed value, not the raw token, so a trailing comma ("2015,") is handled.
+    if bare and not shorthand and re.fullmatch(r"(?:19|20)\d{2}", number.replace(",", "").strip()):
         return
     period = _period_after(text, match.end())
     if period == "other":
         return
     if period == "year":
         kind = "year"
+    clause = _clause_at(text, start)
     amounts.append(
         _Amount(
             start=start,
             end=end,
             value=value,
             kind=kind,
-            conditional=_is_conditional(text, start, end),
+            conditional=_is_conditional(clause),
+            nonbase=_is_nonbase(clause),
         )
     )
     covered.append((match.start(), match.end()))
@@ -285,13 +331,15 @@ def _add_range(
         start, end = match.start(group_start), match.end(group_start)
         if _DURATION_AFTER_RE.match(text, end):
             continue
+        clause = _clause_at(text, start)
         amounts.append(
             _Amount(
                 start=start,
                 end=end,
                 value=value,
                 kind=kind,
-                conditional=_is_conditional(text, start, end),
+                conditional=_is_conditional(clause),
+                nonbase=_is_nonbase(clause),
             )
         )
     covered.append((match.start(), match.end()))
@@ -338,9 +386,13 @@ def classify_stipend(
         return StipendInfo(state=UNPAID, note="the posting states there is no fixed paid stipend")
 
     amounts = _collect_amounts(text)
-    clean = [a for a in amounts if not a.conditional]
-    if clean:
-        values = [a.monthly for a in clean]
+    # Judge the floor against the posting's governing stipend figure - the
+    # recurring/fixed amount tied to a stipend cue - never against min() of
+    # unrelated numbers (headcount, a benefit's worth, a one-time bonus or an
+    # allowance), which must not drag a qualifying base below the floor.
+    base = [a for a in amounts if a.is_base]
+    if base:
+        values = [a.monthly for a in base]
         low, high = min(values), max(values)
         state = CONFIRMED_GE_FLOOR if low >= int(floor) else CONFIRMED_BELOW_FLOOR
         return StipendInfo(
