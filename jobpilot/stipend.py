@@ -29,10 +29,14 @@ Assumptions (explicit):
   ``based on performance``, ``up to ₹50,000/month``) is ``unstated`` and, per
   the captain's choice, is surfaced in a separate section instead of being
   dropped - a missing amount is never invented and never silently fails.
-* An amount counts only when its clause carries an INR marker (``₹``/``Rs``/
-  ``INR``/``rupees``). A bare figure, or one quoted in another currency (``$``/
-  ``USD``/``EUR``/...), is left ``unstated`` rather than judged against the ₹
+* The parser reads only rupee postings: the text must carry an INR marker
+  (``₹``/``Rs``/``INR``/``rupees``) somewhere, and a figure explicitly quoted in
+  another currency (``$``/``USD``/``EUR``/...) is never counted. A posting with
+  no rupee marker at all is left ``unstated`` rather than judged against the ₹
   floor or displayed as rupees - the parser never invents rupees.
+* A non-stipend package figure (``CTC``, ``salary package``, ``total
+  compensation``) is never the stipend base and must never confirm the floor: a
+  package is not a stipend.
 
 Nothing here scores, ranks or invents: it only classifies text.
 """
@@ -143,10 +147,36 @@ _RANGE_TAIL_RE = re.compile(
 #: package, so it is divided by twelve.
 _LAKH_UNITS = frozenset({"l", "lac", "lacs", "lakh", "lakhs"})
 
-#: The parser is INR-only: an amount is read only when its clause carries an
-#: INR marker. The symbol needs no word boundary; the look-behind keeps the
-#: ``rs`` inside a word (``hours``) from counting as a currency marker.
+#: The parser is INR-only: an amount is read only in a rupee posting (one that
+#: carries an INR marker). The symbol needs no word boundary; the look-behind
+#: keeps the ``rs`` inside a word (``hours``) from counting as a marker.
 _INR_RE = re.compile(r"₹|(?<![a-z0-9])(?:inr|rs\.?|rupees?)", re.IGNORECASE)
+
+#: Non-INR currency surface forms. An amount quoted in one of these is not an
+#: INR figure even in a posting that also quotes rupees.
+_FOREIGN_SYMBOLS = frozenset("$£€¥₽₩")
+_FOREIGN_CODES = frozenset(
+    {
+        "usd", "eur", "gbp", "aud", "cad", "sgd", "aed", "chf", "jpy", "cny",
+        "dollar", "dollars", "euro", "euros", "pound", "pounds", "dirham",
+        "dirhams", "yen", "yuan", "rmb",
+    }
+)
+
+
+def _foreign_currency_adjacent(text: str, start: int, end: int) -> bool:
+    """True when the amount spanning ``[start, end)`` is quoted in a foreign currency."""
+    before = text[:start].rstrip()
+    if before and before[-1] in _FOREIGN_SYMBOLS:
+        return True
+    word = re.search(r"([A-Za-z]+)\s*$", before)
+    if word is not None and word.group(1).casefold() in _FOREIGN_CODES:
+        return True
+    after = text[end:].lstrip()
+    if after[:1] in _FOREIGN_SYMBOLS:
+        return True
+    code = re.match(r"([A-Za-z]+)", after)
+    return code is not None and code.group(1).casefold() in _FOREIGN_CODES
 
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(
@@ -160,15 +190,15 @@ _UNPAID_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: A negated "unpaid" is not a statement that the role is unpaid: "we do not
-#: offer unpaid internships", "not an unpaid one", "unpaid roles are not
-#: offered". Such a negation must not override a real confirmed figure.
+#: A negated "unpaid"/"commission only" is not a statement that the role is
+#: unpaid: "we do not offer unpaid internships", "not an unpaid one", "not a
+#: commission-only role". Such a negation must not override a real figure.
 _UNPAID_NEGATION_RE = re.compile(
     r"\b(?:not|never|no(?:\s+longer)?|isn'?t|aren'?t|wasn'?t|weren'?t"
     r"|don'?t|doesn'?t|didn'?t|won'?t|can'?t|cannot)\s+"
     r"(?:(?:offer|offering|provide|providing|hire|hiring|accept|accepting|allow|allowing)\s+)?"
-    r"(?:an?\s+)?unpaid\b"
-    r"|\bunpaid\b\s+(?:roles?|internships?|positions?|jobs?)?\s*"
+    r"(?:an?\s+)?(?:unpaid|commission[\s-]?only)\b"
+    r"|\b(?:unpaid|commission[\s-]?only)\b\s+(?:roles?|internships?|positions?|jobs?)?\s*"
     r"(?:are|is|will\s+be|would\s+be|was|were)?\s*not\s+"
     r"(?:offered|available|provided|accepted|hiring|hired)\b",
     re.IGNORECASE,
@@ -188,11 +218,14 @@ _PERFORMANCE_QUALIFIER = (
     r"|\bperformance\s+stipend\b"
     r"|\bvariable\s+(?:stipend|pay|component)\b"
 )
+#: An upper-bound cap ("up to"/"upto"/"up-to"/"up – to"), accepted in any
+#: spacing or hyphen/dash spelling. A cap is not a fixed figure.
+_CAP_RE = re.compile(r"\bup[\s\-–—]*to\b", re.IGNORECASE)
 #: Qualifiers that make the amount they attach to conditional. A bare
 #: "incentives" mention is an add-on component, not a condition on the base, so
 #: a fixed monthly figure stays fixed alongside it.
 _CONDITIONAL_RE = re.compile(
-    rf"{_PERFORMANCE_QUALIFIER}|\bup\s*to\b",
+    rf"{_PERFORMANCE_QUALIFIER}|{_CAP_RE.pattern}",
     re.IGNORECASE,
 )
 
@@ -219,7 +252,8 @@ _NONBASE_RE = re.compile(
     r"|\bincentiv\w*|\bperks?\b|\bbene(?:fit|fits)\b|\bworth\b|\bvoucher\b"
     r"|\bprize\b|\baward\b|\bscholarship\b|\bfees?\b|\btuition\b"
     r"|\brelocation\b|\btravel\b|\bfood\b|\bmeals?\b|\baccommodation\b"
-    r"|\binternet\b|\bcertificate\b",
+    r"|\binternet\b|\bcertificate\b"
+    r"|\bctc\b|\bpackages?\b|\btotal\s+compensation\b|\bcost\s+to\s+company\b",
     re.IGNORECASE,
 )
 
@@ -288,6 +322,7 @@ class _Amount:
     value: int
     kind: str = "month"  # "month" or "year"
     conditional: bool = False
+    cap: bool = False
     nonbase: bool = False
     divisor: int = 1
     cue_rank: int = 0  # 2 stipend/remuneration, 1 salary/compensation/pay, 0 none
@@ -315,6 +350,10 @@ def _clause_span(text: str, start: int) -> tuple[int, int]:
 
 def _is_conditional(clause: str) -> bool:
     return bool(_CONDITIONAL_RE.search(clause))
+
+
+def _is_cap(clause: str) -> bool:
+    return bool(_CAP_RE.search(clause))
 
 
 def _is_nonbase(text: str, start: int, end: int, clause_left: int, clause_right: int) -> bool:
@@ -393,6 +432,8 @@ def _add(
     if value is None:
         return
     start, end = match.start(1), match.end(1)
+    if _foreign_currency_adjacent(text, start, end):
+        return
     if _DURATION_AFTER_RE.match(text, end):
         return
     # A *bare* four-digit year near a stipend is not a stipend; an explicit
@@ -414,9 +455,12 @@ def _add(
     # the stipend and must never drag the governing figure below the floor.
     clause_left, clause_right = _clause_span(text, start)
     clause = text[clause_left:clause_right]
-    # The amount must be quoted in INR: a bare figure or a foreign-currency
-    # figure shares the clause with no INR marker and is not a rupee amount.
-    if not _INR_RE.search(clause):
+    # Rupees are a property of the posting, not the clause: a figure in a
+    # rupee-denominated posting is rupees even when the marker sits in another
+    # clause ("CTC ₹6,00,000. Stipend: 15,000 per month."), while a figure
+    # quoted in another currency is already rejected above. A posting with no
+    # rupee marker at all states no rupee amount.
+    if not _INR_RE.search(clause) and not _INR_RE.search(text):
         return
     if bare and not _CUE_RE.search(clause):
         return
@@ -442,6 +486,7 @@ def _add(
             value=value,
             kind=kind,
             conditional=_is_conditional(clause),
+            cap=_is_cap(clause),
             nonbase=_is_nonbase(text, start, end, clause_left, clause_right),
             divisor=divisor,
             cue_rank=_cue_rank(clause),
@@ -479,10 +524,13 @@ def _add_range(
         return
     if period == "year":
         kind = "year"
+    if _foreign_currency_adjacent(text, match.start(), match.end()):
+        return
     clause_left, clause_right = _clause_span(text, match.start(value_groups[0]))
     clause = text[clause_left:clause_right]
-    # An INR marker stated once anywhere in the range governs both ends.
-    if not _INR_RE.search(clause):
+    # A rupee marker anywhere in the posting governs both ends, as it does for
+    # a single amount.
+    if not _INR_RE.search(clause) and not _INR_RE.search(text):
         return
     if period is None and _PREPOSED_YEAR_RE.search(text[clause_left:match.start(value_groups[0])]):
         kind = "year"
@@ -506,6 +554,7 @@ def _add_range(
                 value=value,
                 kind=kind,
                 conditional=_is_conditional(clause),
+                cap=_is_cap(clause),
                 nonbase=_is_nonbase(text, start, end, clause_left, clause_right),
                 cue_rank=_cue_rank(clause),
             )
@@ -578,9 +627,8 @@ def classify_stipend(
 ) -> StipendInfo:
     """Classify a posting's stipend text against a monthly floor.
 
-    An amount is read only when its clause carries an INR marker
-    (``₹``/``Rs``/``INR``/``rupees``); a bare figure or a foreign-currency
-    figure is never invented into rupees.
+    An amount is read only in a rupee posting (one carrying an INR marker); a
+    figure quoted in another currency is never invented into rupees.
     """
     text = text or ""
     amounts = _collect_amounts(text)
@@ -596,18 +644,11 @@ def classify_stipend(
         base_rank = max(a.cue_rank for a in base)
         governing = [a for a in base if a.cue_rank == base_rank]
         if base_rank == 0:
+            # A cue-less annual package yields to a cue-less monthly figure, so
+            # "CTC ₹6,00,000/annum. ₹15,000/month" is judged on the monthly rate.
             monthly = [a for a in governing if a.kind == "month"]
             if monthly:
                 governing = monthly
-            else:
-                # A cue-less annual package yields to a monthly figure tied to a
-                # stipend cue, so "up to ₹15,000/month. CTC ₹6,00,000/annum." is
-                # judged on the stipend, never on the unseen package.
-                cued_monthly = [
-                    a for a in amounts if a.kind == "month" and a.cue_rank > 0
-                ]
-                if cued_monthly:
-                    governing = cued_monthly
         # An explicit unpaid statement is overridden only by a figure tied to the
         # stipend itself (a stipend/remuneration cue), never by a broader salary
         # or package figure.
@@ -616,4 +657,14 @@ def classify_stipend(
 
     if unpaid_signal:
         return StipendInfo(state=UNPAID)
+
+    # With no fixed base, an "up to" cap is not a figure that can confirm the
+    # floor. A cap that is itself below the floor still identifies a below-floor
+    # stipend; a cap at or above the floor is unknown, never confirmed.
+    caps = [a for a in amounts if a.cap and not a.nonbase]
+    if caps:
+        cap_rank = max(a.cue_rank for a in caps)
+        info = _confirmed(text, [a for a in caps if a.cue_rank == cap_rank], floor)
+        if info.state == CONFIRMED_BELOW_FLOOR:
+            return info
     return _unstated()

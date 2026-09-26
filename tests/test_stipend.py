@@ -374,6 +374,16 @@ class GoverningFigureTests(unittest.TestCase):
             self.assertEqual(info.amount, 15000, text)
             self.assertTrue(info.dropped, text)
 
+    def test_package_never_confirms_the_floor_for_a_bare_stipend(self):
+        # A below-floor stipend must not be reported as confirmed at the package
+        # rate just because the stipend figure itself carries no rupee marker.
+        info = classify_stipend("Annual CTC ₹6,00,000. Stipend: 15,000 per month.")
+        self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(info.amount, 15000)
+        self.assertTrue(info.dropped)
+        # A package figure is not a stipend on its own.
+        self.assertEqual(classify_stipend("Annual CTC ₹6,00,000.").state, UNSTATED)
+
     def test_range_high_comes_from_the_stated_stipend_range_not_a_package_figure(self):
         info = classify_stipend("Stipend: ₹30,000-40,000/month. CTC: ₹6,00,000 per annum.")
         self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
@@ -498,15 +508,48 @@ class NegativeFormsTests(unittest.TestCase):
 
     def test_upper_bound_only_stipend_is_unstated_not_unpaid(self):
         # An "up to X" cap cannot confirm the floor, so it is unknown and must be
-        # surfaced for verification - never dropped as unpaid.
+        # surfaced for verification - never dropped as unpaid. The hyphen/dash
+        # spelling of the same cap ("up-to"/"up–to") behaves identically.
         for text in (
             "Stipend: up to ₹50,000/month",
             "upto ₹35,000/month",
+            "Stipend: up-to ₹50,000/month",
+            "Stipend: up–to ₹50,000/month",
+            "Stipend: up - to ₹50,000/month",
             "Stipend: up to 40k per month",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, UNSTATED, text)
             self.assertFalse(info.dropped, text)
+
+    def test_cap_at_or_above_floor_never_confirms_from_a_package(self):
+        # A cap is not a fixed figure: a package figure must never turn an
+        # at/above-floor "up to" stipend into a confirmed floor-clearing one.
+        for text in (
+            "Stipend: up to ₹50,000/month. CTC ₹6,00,000/annum.",
+            "Stipend: up-to ₹50,000/month. CTC ₹6,00,000/annum.",
+            "Stipend: up to ₹50,000/month + a CTC package",
+        ):
+            info = classify_stipend(text)
+            self.assertNotEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertFalse(info.dropped, text)
+        # A cap below the floor is still judged on the actual stipend.
+        below = classify_stipend("Stipend: up to ₹15,000/month. CTC ₹6,00,000/annum.")
+        self.assertEqual(below.state, CONFIRMED_BELOW_FLOOR)
+        self.assertEqual(below.amount, 15000)
+
+    def test_negated_commission_only_does_not_drop_a_paid_posting(self):
+        # "not a commission-only role"/"Not commission only" negates the phrase,
+        # so it must not mark an explicitly paid posting unpaid.
+        for text in (
+            "This is not a commission-only role. Salary: ₹40,000 per month.",
+            "Salary: ₹40,000 per month. Not commission only.",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)
+            self.assertEqual(info.amount, 40000, text)
+        # A genuine, un-negated "commission only" stays unpaid.
+        self.assertEqual(classify_stipend("commission only").state, UNPAID)
 
     def test_genuine_unpaid_statements_survive_a_cross_phrase_negation(self):
         # A negation that governs a different phrase ("no stipend", "not paying")
