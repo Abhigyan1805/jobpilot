@@ -244,7 +244,7 @@ def review_only_reasons(posting: JobPosting, cfg) -> list[str]:
     ft = fulltime_check(posting, cfg)
     if ft.review_only:
         reasons.append(ft.detail)
-    text = " ".join(p for p in [posting.description, posting.salary] if p)
+    text = posting.description or ""
     info = classify_stipend(text, floor=int(getattr(cfg, "stipend_floor", 30000)))
     if info.state == UNSTATED:
         reasons.append("stipend not stated; verify before applying")
@@ -298,7 +298,7 @@ def stipend_check(posting: JobPosting, cfg) -> CheckResult:
     The state is computed where it is used (here and in ``present``); it is not
     persisted, so there is a single definition of it.
     """
-    text = " ".join(p for p in [posting.description, posting.salary] if p)
+    text = posting.description or ""
     info = classify_stipend(
         text,
         floor=int(getattr(cfg, "stipend_floor", 30000)),

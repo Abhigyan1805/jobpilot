@@ -29,9 +29,10 @@ Assumptions (explicit):
   ``based on performance``, ``up to ₹50,000/month``) is ``unstated`` and, per
   the captain's choice, is surfaced in a separate section instead of being
   dropped - a missing amount is never invented and never silently fails.
-* A figure quoted in a foreign currency (``$``/``USD``/``EUR``/...) is not an
-  INR amount: it is left ``unstated`` rather than judged against the ₹ floor
-  or displayed as rupees.
+* An amount counts only when its clause carries an INR marker (``₹``/``Rs``/
+  ``INR``/``rupees``). A bare figure, or one quoted in another currency (``$``/
+  ``USD``/``EUR``/...), is left ``unstated`` rather than judged against the ₹
+  floor or displayed as rupees - the parser never invents rupees.
 
 Nothing here scores, ranks or invents: it only classifies text.
 """
@@ -142,34 +143,10 @@ _RANGE_TAIL_RE = re.compile(
 #: package, so it is divided by twelve.
 _LAKH_UNITS = frozenset({"l", "lac", "lacs", "lakh", "lakhs"})
 
-#: Non-INR currency surface forms. The parser is INR-only, so an amount quoted
-#: in one of these is not an INR figure and must never be judged against the
-#: rupee floor or displayed as rupees.
-_FOREIGN_SYMBOLS = frozenset("$£€¥₽₩")
-_FOREIGN_CODES = frozenset(
-    {
-        "usd", "eur", "gbp", "aud", "cad", "sgd", "aed", "chf", "jpy", "cny",
-        "dollar", "dollars", "euro", "euros", "pound", "pounds", "dirham",
-        "dirhams", "yen", "yuan", "rmb",
-    }
-)
-
-
-def _foreign_currency_adjacent(text: str, start: int, end: int) -> bool:
-    """True when the amount spanning ``[start, end)`` is quoted in a foreign currency."""
-    before = text[:start].rstrip()
-    if before and before[-1] in _FOREIGN_SYMBOLS:
-        return True
-    word = re.search(r"([A-Za-z]+)\s*$", before)
-    if word is not None and word.group(1).casefold() in _FOREIGN_CODES:
-        return True
-    after = text[end:].lstrip()
-    if after[:1] in _FOREIGN_SYMBOLS:
-        return True
-    code = re.match(r"([A-Za-z]+)", after)
-    if code is not None and code.group(1).casefold() in _FOREIGN_CODES:
-        return True
-    return False
+#: The parser is INR-only: an amount is read only when its clause carries an
+#: INR marker. The symbol needs no word boundary; the look-behind keeps the
+#: ``rs`` inside a word (``hours``) from counting as a currency marker.
+_INR_RE = re.compile(r"₹|(?<![a-z0-9])(?:inr|rs\.?|rupees?)", re.IGNORECASE)
 
 #: Unambiguously no fixed paid stipend.
 _UNPAID_RE = re.compile(
@@ -416,8 +393,6 @@ def _add(
     if value is None:
         return
     start, end = match.start(1), match.end(1)
-    if _foreign_currency_adjacent(text, start, end):
-        return
     if _DURATION_AFTER_RE.match(text, end):
         return
     # A *bare* four-digit year near a stipend is not a stipend; an explicit
@@ -439,6 +414,10 @@ def _add(
     # the stipend and must never drag the governing figure below the floor.
     clause_left, clause_right = _clause_span(text, start)
     clause = text[clause_left:clause_right]
+    # The amount must be quoted in INR: a bare figure or a foreign-currency
+    # figure shares the clause with no INR marker and is not a rupee amount.
+    if not _INR_RE.search(clause):
+        return
     if bare and not _CUE_RE.search(clause):
         return
     if not embedded_period and period is None and _PREPOSED_YEAR_RE.search(
@@ -495,8 +474,6 @@ def _add_range(
     """Record both ends of a shorthand range whose unit applies to both numbers."""
     if _overlaps(covered, match.start(), match.end()):
         return
-    if _foreign_currency_adjacent(text, match.start(), match.end()):
-        return
     period = _period_after(text, match.end())
     if period == "other":
         return
@@ -504,6 +481,9 @@ def _add_range(
         kind = "year"
     clause_left, clause_right = _clause_span(text, match.start(value_groups[0]))
     clause = text[clause_left:clause_right]
+    # An INR marker stated once anywhere in the range governs both ends.
+    if not _INR_RE.search(clause):
+        return
     if period is None and _PREPOSED_YEAR_RE.search(text[clause_left:match.start(value_groups[0])]):
         kind = "year"
     for group_start, shorthand_group in zip(value_groups, shorthand_groups):
@@ -598,8 +578,9 @@ def classify_stipend(
 ) -> StipendInfo:
     """Classify a posting's stipend text against a monthly floor.
 
-    Only the INR surface forms (``₹``/``Rs``/``INR``/``rupees``) are recognised;
-    a foreign-currency figure is never invented into rupees.
+    An amount is read only when its clause carries an INR marker
+    (``₹``/``Rs``/``INR``/``rupees``); a bare figure or a foreign-currency
+    figure is never invented into rupees.
     """
     text = text or ""
     amounts = _collect_amounts(text)

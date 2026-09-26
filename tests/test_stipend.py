@@ -42,11 +42,11 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual((info.amount, info.amount_high), (5000, 10000))
 
     def test_per_month_and_shorthand_forms(self):
-        self.assertEqual(classify_stipend("Stipend: 3000 Per month").amount, 3000)
+        self.assertEqual(classify_stipend("Stipend: Rs 3000 Per month").amount, 3000)
         self.assertEqual(classify_stipend("INR 5K stipend per month").amount, 5000)
-        self.assertEqual(classify_stipend("Stipend: 1K").amount, 1000)
-        self.assertEqual(classify_stipend("Stipend: 1.5K per month").amount, 1500)
-        info = classify_stipend("Stipend: 12-15k per month")
+        self.assertEqual(classify_stipend("Stipend: ₹1K").amount, 1000)
+        self.assertEqual(classify_stipend("Stipend: Rs 1.5K per month").amount, 1500)
+        info = classify_stipend("Stipend: ₹12-15k per month")
         self.assertEqual((info.amount, info.amount_high), (12000, 15000))
 
     def test_bare_currency_and_period_variants(self):
@@ -104,12 +104,12 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(per_annum.amount, 25000)
 
     def test_k_suffixed_range_is_detected_on_either_end(self):
-        both = classify_stipend("Stipend: 30k - 40k /month")
+        both = classify_stipend("Stipend: Rs 30k - 40k /month")
         self.assertEqual(both.state, CONFIRMED_GE_FLOOR)
         self.assertEqual((both.amount, both.amount_high), (30000, 40000))
         self.assertEqual(both.display_label(), "₹30,000-40,000/mo confirmed")
 
-        below = classify_stipend("Stipend: 10k-15k /month")
+        below = classify_stipend("Stipend: INR 10k-15k /month")
         self.assertEqual(below.state, CONFIRMED_BELOW_FLOOR)
         self.assertEqual((below.amount, below.amount_high), (10000, 15000))
         self.assertEqual(below.display_label(), "₹10,000-15,000/mo below floor")
@@ -117,12 +117,12 @@ class ParseFormsTests(unittest.TestCase):
     def test_mixed_full_number_and_k_range_does_not_scale_the_full_end(self):
         # Only the shorthand end carries the K, so a written-out lower bound
         # keeps its own value: the floor is judged against 25,000, not 30,000.
-        info = classify_stipend("Stipend: 25,000-30k per month")
+        info = classify_stipend("Stipend: Rs 25,000-30k per month")
         self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
         self.assertEqual((info.amount, info.amount_high), (25000, 30000))
         self.assertEqual(info.display_label(), "₹25,000-30,000/mo below floor")
 
-        low = classify_stipend("Stipend: 8,000-10k per month")
+        low = classify_stipend("Stipend: Rs 8,000-10k per month")
         self.assertEqual((low.amount, low.amount_high), (8000, 10000))
         self.assertEqual(low.display_label(), "₹8,000-10,000/mo below floor")
 
@@ -200,13 +200,37 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(info.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(info.amount, 35000)
 
+    def test_amount_without_an_inr_marker_is_unstated(self):
+        # An INR marker is required to confirm a monthly amount. A bare figure
+        # (even in a stipend clause) or one quoted in another currency states no
+        # rupee amount, so it is unknown and surfaced - never confirmed or dropped.
+        for text in (
+            "Salary (USD): 40,000 per month",
+            "USD: 40,000 per month",
+            "Stipend: 40000 (USD) per month",
+            "Salary range: 40,000 - 50,000 USD per month",
+            "Stipend: 3000 Per month",
+            "Stipend: 1K",
+            "Stipend: 12-15k per month",
+            "Stipend: 30k - 40k /month",
+            "Stipend: 25,000-30k per month",
+            "Stipend: 6 LPA",
+        ):
+            info = classify_stipend(text)
+            self.assertEqual(info.state, UNSTATED, text)
+            self.assertFalse(info.dropped, text)
+            self.assertIsNone(info.amount, text)
+        # The INR-marked equivalents still confirm.
+        self.assertEqual(classify_stipend("Stipend: Rs 35,000 per month").state, CONFIRMED_GE_FLOOR)
+        self.assertEqual(classify_stipend("₹40,000/month").state, CONFIRMED_GE_FLOOR)
+
     def test_annual_figures_are_not_mangled(self):
         per_annum = classify_stipend("₹6,00,000 per annum")
         self.assertEqual(per_annum.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(per_annum.amount, 50000)
         self.assertNotIn("-", per_annum.display_label())
 
-        lpa = classify_stipend("Stipend: 6 LPA")
+        lpa = classify_stipend("Stipend: INR 6 LPA")
         self.assertEqual(lpa.state, CONFIRMED_GE_FLOOR)
         self.assertEqual(lpa.amount, 50000)
 
@@ -215,7 +239,7 @@ class ParseFormsTests(unittest.TestCase):
         # stated per annum (or with no period) is annual, so ₹4.8L is ₹40,000/mo.
         for text in (
             "Stipend: ₹4.8L per annum",
-            "Stipend: 4.8L per year",
+            "Stipend: ₹4.8L per year",
             "Stipend: ₹4.8 lac per annum",
             "Stipend: ₹4.8 Lakhs",
         ):
@@ -229,7 +253,7 @@ class ParseFormsTests(unittest.TestCase):
         self.assertEqual(info.amount, 480000)
 
     def test_explicit_two_thousand_amount_is_not_dropped_as_a_year(self):
-        for text in ("₹2000/month", "Stipend: 2000 per month"):
+        for text in ("₹2000/month", "Stipend: Rs 2000 per month"):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR, text)
             self.assertEqual(info.amount, 2000, text)
@@ -286,7 +310,7 @@ class GoverningFigureTests(unittest.TestCase):
             "₹30,000/month (fixed) + up to ₹5,000 bonus",
             "Stipend: ₹30,000/month with incentives",
             "Stipend: ₹30,000/month incentives included",
-            "Stipend: 40,000 per month plus incentives",
+            "Stipend: Rs 40,000 per month plus incentives",
             "Stipend: ₹30,000/month plus a joining bonus of ₹5,000.",
         ):
             info = classify_stipend(text)
@@ -343,7 +367,7 @@ class GoverningFigureTests(unittest.TestCase):
         # sub-floor monthly stipend that actually governs.
         for text in (
             "CTC ₹6,00,000/annum. Stipend ₹15,000/month.",
-            "Annual salary: 6,00,000. Stipend: 15,000 per month",
+            "Annual salary: ₹6,00,000. Stipend: ₹15,000 per month",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR, text)
@@ -386,7 +410,7 @@ class GoverningFigureTests(unittest.TestCase):
         for text, state, amount in (
             ("Stipend: ₹30,000/month (food and accommodation not included)", CONFIRMED_GE_FLOOR, 30000),
             ("Stipend: ₹30,000 per month for travel", CONFIRMED_GE_FLOOR, 30000),
-            ("Stipend: 35,000 (Food and Accommodation provided)", CONFIRMED_GE_FLOOR, 35000),
+            ("Stipend: Rs 35,000 (Food and Accommodation provided)", CONFIRMED_GE_FLOOR, 35000),
             ("Stipend: ₹10,000 per month (travel allowance extra)", CONFIRMED_BELOW_FLOOR, 10000),
         ):
             info = classify_stipend(text)
@@ -399,11 +423,11 @@ class GoverningFigureTests(unittest.TestCase):
         # and never drag the real ₹30,000 stipend below the floor.
         for text in (
             "Travel stipend ₹2,000/month. Stipend: ₹30,000/month.",
-            "Internet stipend 1,000/month. Stipend: 30,000/month.",
+            "Internet stipend ₹1,000/month. Stipend: ₹30,000/month.",
             "Internet stipend: ₹1,000/month. Stipend: ₹30,000/month.",
             "Travel allowance ₹2,000/month. Stipend: ₹30,000/month.",
             "Travel allowance ₹2,000/month stipend ₹30,000/month",
-            "Internet stipend 1,000/month stipend 30,000/month",
+            "Internet stipend ₹1,000/month stipend ₹30,000/month",
         ):
             info = classify_stipend(text)
             self.assertEqual(info.state, CONFIRMED_GE_FLOOR, text)

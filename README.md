@@ -211,9 +211,10 @@ resume content and never submits.
 
 Two more presentation-layer rules apply. A `[filter].stipend_floor` (default
 ₹30,000/month) drops postings whose stipend is confirmed below the floor or is
-explicitly unpaid/performance-based; postings whose stipend is simply *not
-stated* are kept but shown in a separate **"Stipend not stated — verify before
-applying"** section, never silently failed. And `[filter].exclude_file` names a
+explicitly unpaid (including commission-only); a performance-based or `up to`
+stipend with no fixed monthly figure is treated as unknown, exactly like a
+posting whose stipend is simply *not stated*, and is kept but shown in a separate
+**"Stipend not stated — verify before applying"** section, never silently failed. And `[filter].exclude_file` names a
 tracked TOML list of postings already applied to (default
 `data/applied-postings.toml`, set to `""` to disable); `present` drops them
 entirely (matched by url or stable id, so a re-discovery is excluded while a

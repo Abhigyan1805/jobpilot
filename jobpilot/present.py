@@ -277,10 +277,6 @@ def _exclusions_for(config: Config) -> ExclusionList:
     return ExclusionList.load(config.resolve(path))
 
 
-def _stipend_text(posting: JobPosting) -> str:
-    return " ".join(p for p in [posting.description, posting.salary] if p)
-
-
 def select_matches(
     candidates: list[ReviewCandidate], matcher: Matcher, config: Config
 ) -> SelectionResult:
@@ -310,7 +306,7 @@ def select_matches(
             continue
 
         stipend = classify_stipend(
-            _stipend_text(candidate.posting),
+            candidate.posting.description or "",
             floor=int(config.filter.stipend_floor),
         )
         if stipend.state in DROPPED_STATES:

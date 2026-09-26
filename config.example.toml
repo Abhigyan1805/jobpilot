@@ -128,13 +128,14 @@ allow_unknown_location = false   # a posting with no location is rejected
 window_start_month = 1
 window_end_month = 6
 
-# Minimum monthly stipend (INR/month by design; the extractor handles the common
-# India forms - ₹/Rs/INR, "15,000-18,000/ month", "1K"/"1.5K", bare "INR 40000",
-# "6 LPA" - and never invents an amount). A confirmed figure at or above this is
+# Minimum monthly stipend (INR/month by design; the extractor reads only
+# INR-marked amounts - ₹/Rs/INR, "15,000-18,000/ month", "1K"/"1.5K", "INR 6
+# LPA" - and never invents an amount). A confirmed figure at or above this is
 # shown in the main `present` list; a confirmed figure below it, or an explicitly
-# unpaid/performance-based posting, is dropped; a posting whose stipend is not
-# stated is shown in a separate "Stipend not stated - verify" section rather than
-# silently failing the floor.
+# unpaid / commission-only posting, is dropped; a performance-based or "up to"
+# stipend with no fixed figure, or a posting whose stipend is not stated, is
+# shown in a separate "Stipend not stated - verify" section rather than silently
+# failing the floor.
 stipend_floor = 30000
 
 # Postings you have already applied to, excluded from `jobpilot present`
