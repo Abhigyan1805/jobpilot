@@ -206,7 +206,10 @@ stipend_floor = 30000
 # entirely (matched by url or stable id/source+job_id, so a re-discovery is
 # excluded while a new same-company/same-title posting is not). This is a filter,
 # never a deletion from the store. Defaults to the shipped list; set it to "" to
-# disable the exclusion entirely.
+# disable the exclusion entirely. A relative path is searched against the output
+# project, the config's directory, then the repository root, so a run-config
+# placed outside the repo still finds the shipped list; a configured path that
+# resolves nowhere stops the run instead of silently excluding nothing.
 exclude_file = "data/applied-postings.toml"
 
 # ---------------------------------------------------------------------------
