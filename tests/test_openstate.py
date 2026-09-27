@@ -42,9 +42,14 @@ class AssessOpenStateTests(unittest.TestCase):
         self.assertTrue(state.closed)
         self.assertIn("registration ended", state.reason)
 
-    def test_future_end_date_with_registration_open_is_open(self):
+    def test_future_end_date_without_a_registration_window_is_unverified(self):
+        # A top-level ``end_date`` is the internship's window, not the
+        # registration close; with no observed registration window the
+        # application is unverified, never claimed confirmed open.
         state = assess_open_state(_unstop(regn_open=1, end_date=FUTURE), today=TODAY)
-        self.assertIs(state.open, True)
+        self.assertIsNone(state.open)
+        self.assertFalse(state.closed)
+        self.assertEqual(state.key, "unverified")
 
     def test_regn_open_without_a_window_is_unverified_not_open(self):
         # ``regn_open=1`` alone is the page-19 flag that stayed set on closed
@@ -232,6 +237,31 @@ class UnstopRegistrationWindowTests(unittest.TestCase):
         )
         state = assess_open_state(p, now=datetime(2026, 9, 27, 8, 0, tzinfo=timezone.utc))
         self.assertTrue(state.closed)
+
+    def test_fractional_seconds_keep_the_stated_offset(self):
+        # 2026-09-27T13:21:43.5+05:30 is 07:51:43.5 UTC, before the 08:00 UTC now.
+        # Only keeping the offset past the fractional seconds marks it closed;
+        # dropping it would read 13:21 wall-clock and wrongly call it open.
+        p = _unstop(
+            regn_open=1,
+            regnRequirements={"end_regn_dt": "2026-09-27T13:21:43.500000+05:30"},
+        )
+        state = assess_open_state(p, now=datetime(2026, 9, 27, 8, 0, tzinfo=timezone.utc))
+        self.assertTrue(state.closed)
+        self.assertIn("registration closed", state.reason)
+
+    def test_malformed_registration_offset_is_unverified_not_a_crash(self):
+        # An untrusted board row can carry an out-of-range offset; parsing it
+        # must fail closed to unverified, never raise out of assess_open_state
+        # and abort the run.
+        p = _unstop(
+            regn_open=1,
+            regnRequirements={"end_regn_dt": "2026-09-15T11:42:19+25:00"},
+        )
+        state = assess_open_state(p, today=TODAY)
+        self.assertIsNone(state.open)
+        self.assertFalse(state.closed)
+        self.assertEqual(state.key, "unverified")
 
     def test_registration_close_verdict_is_host_timezone_independent(self):
         # The same instant expressed as UTC and as IST must decide identically.

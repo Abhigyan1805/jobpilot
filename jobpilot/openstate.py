@@ -25,19 +25,22 @@ This is what caught the page-19 misses: Deep Variance, Prism Labs, Kisan Udyog
 and Zenotalent all carried a future-looking ``end_date`` (the internship end) but
 a past ``end_regn_dt``.
 
-An *unknown* end date or absent registration metadata is **unverified**, not
-closed: the source published no closure signal. It stays open-but-unverified so
-the pipeline can still surface it, and ``jobpilot present`` marks it as
-unverified rather than silently presenting it as confirmed-open. An applicant
-count is not an open-state signal at all: the tool never reads it, so volume can
-never silently close a posting.
+An absent registration window is **unverified**, not closed and not confirmed
+open: the source published no registration-closure signal. It stays
+open-but-unverified so the pipeline can still surface it, and ``jobpilot
+present`` marks it as unverified rather than silently presenting it as
+confirmed-open. A top-level ``end_date`` is the internship window, not the
+registration close, so on its own it can only ever *close* a posting (when
+past); it never confirms one open. An applicant count is not an open-state
+signal at all: the tool never reads it, so volume can never silently close a
+posting.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timezone
 
 from jobpilot.deadline import deadline_status, extract_deadline, parse_iso_deadline
 
@@ -54,49 +57,20 @@ _CLOSED_TEXT_RE = re.compile(
 #: String values Unstop uses for a falsy boolean.
 _FALSY = {"", "0", "false", "no", "none", "null"}
 
-#: An ISO date or datetime, used for Unstop's registration window. The time is
-#: kept when the board states one (a registration close earlier *today* has
-#: passed), while a date-only value is compared at midnight. A trailing UTC
-#: offset is captured and applied, so the comparison does not depend on the
-#: host's timezone.
-_ISO_DATETIME_RE = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?"
-    r"\s*(Z|[+-]\d{2}:?\d{2})?"
-)
-
-
 def _parse_registration_dt(value) -> datetime | None:
-    """Parse Unstop's registration-window timestamp, keeping time and offset."""
-    if not isinstance(value, str):
-        return None
-    match = _ISO_DATETIME_RE.match(value.strip())
-    if not match:
+    """Parse Unstop's registration-window timestamp, keeping time and offset.
+
+    Untrusted board data: any unparseable value (including an out-of-range UTC
+    offset) returns ``None`` rather than raising, so one malformed row can never
+    abort a run. ``datetime.fromisoformat`` keeps the stated offset (and any
+    fractional seconds) so the comparison does not depend on the host timezone.
+    """
+    if not isinstance(value, str) or not value.strip():
         return None
     try:
-        parsed = datetime(
-            int(match.group(1)),
-            int(match.group(2)),
-            int(match.group(3)),
-            int(match.group(4) or 0),
-            int(match.group(5) or 0),
-            int(match.group(6) or 0),
-        )
+        return datetime.fromisoformat(value.strip())
     except ValueError:
         return None
-    offset = match.group(7)
-    return _apply_offset(parsed, offset)
-
-
-def _apply_offset(parsed: datetime, offset: str | None) -> datetime:
-    """Attach the board's UTC offset to a naive timestamp, when it states one."""
-    if not offset:
-        return parsed
-    if offset.upper() == "Z":
-        return parsed.replace(tzinfo=timezone.utc)
-    sign = 1 if offset[0] == "+" else -1
-    digits = offset[1:].replace(":", "")
-    delta = timedelta(hours=int(digits[:2]), minutes=int(digits[2:4]))
-    return parsed.replace(tzinfo=timezone(sign * delta))
 
 
 def _utc_naive(value: datetime) -> datetime:
@@ -176,8 +150,10 @@ def assess_open_state(posting, *, today: date | None = None, now: datetime | Non
 
     now_utc = _utc_naive(now)
     regn_start, regn_end = _registration_window(raw)
-    # Only a parsed close date in the future is a positive open signal. A bare
-    # ``regn_open=1`` - the exact flag page 19 proved untrustworthy - is not.
+    # Only an observed registration window is a positive open/closed signal. A
+    # bare ``regn_open=1`` - the exact flag page 19 proved untrustworthy - is not,
+    # and neither is the top-level ``end_date`` (the internship's window). A row
+    # with no observed registration window stays unverified, never confirmed open.
     confirmed_open = False
     if unstop_typed and regn_end is not None:
         if _utc_naive(regn_end) < now_utc:
@@ -187,10 +163,8 @@ def assess_open_state(posting, *, today: date | None = None, now: datetime | Non
         return OpenState(False, f"registration opens later ({regn_start.isoformat()})")
     if unstop_typed and "end_date" in raw:
         end_date = parse_iso_deadline(raw.get("end_date"))
-        if end_date is not None:
-            if end_date < today:
-                return OpenState(False, f"registration ended {end_date.isoformat()}")
-            confirmed_open = True
+        if end_date is not None and end_date < today:
+            return OpenState(False, f"registration ended {end_date.isoformat()}")
     if confirmed_open:
         return OpenState(True, "")
 
