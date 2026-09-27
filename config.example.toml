@@ -30,19 +30,49 @@ database = "jobpilot.db"
 
 # ---------------------------------------------------------------------------
 # Discovery sources. Each is a public, unauthenticated read-only endpoint.
-# Replace the example board tokens with the companies you care about.
+# The list below is a verified starting set; replace or extend it with the
+# companies you care about.
+#
+# Every token listed below was verified live read-only against its public board
+# endpoint and returned at least one posting; counts at probe time are recorded
+# in the captain's config (git-ignored) header note. A token that returns zero
+# postings or 404 is not listed. Endpoints:
+#   greenhouse  https://boards-api.greenhouse.io/v1/boards/<token>/jobs
+#   lever       https://api.lever.co/v0/postings/<token>?mode=json
+#   ashby       https://api.ashbyhq.com/posting-api/job-board/<token>
+# Note: api.ashbyhq.com/robots.txt returns HTTP 401, so the enforced robots gate
+# fails closed and Ashby tokens are not fetched at run time; the greenhouse and
+# lever boards are. Drop the Ashby list if that host stays unreadable.
 # ---------------------------------------------------------------------------
 [sources.greenhouse]
 enabled = true
-tokens = ["vercel", "canonical", "stripe"]
+tokens = [
+  # Core AI/ML, data and software boards with India or remote-friendly hiring.
+  "rubrik", "stripe", "groww", "sigmoid", "databricks", "mongodb", "gitlab",
+  "five9", "coinbase", "robinhood", "glance", "inmobi", "druva", "pubmatic",
+  "highradius", "okta", "twilio", "samsara", "figma", "turing", "observeai",
+  "neo4j", "deliveroo", "scaleai", "datadog", "elastic", "canonical", "vercel",
+  "reddit", "dropbox", "affirm", "anthropic", "instacart", "pinterest",
+  "cloudflare", "airbnb", "singlestore", "planetscale", "sofi", "slice",
+  "hackerrank", "gleanwork", "newrelic", "yugabyte", "honeycomb", "pingcap",
+  "mixpanel", "algolia", "discord", "gusto", "intercom", "amplitude",
+  "netlify", "cockroachlabs", "asana", "udemy", "coursera", "chime",
+]
 
 [sources.lever]
 enabled = true
-tokens = ["spotify"]
+tokens = ["paytm", "zeta", "mindtickle", "meesho", "cred", "spotify", "toptal", "porter", "aircall"]
 
 [sources.ashby]
 enabled = true
-tokens = ["openai", "ramp"]
+tokens = [
+  "sarvam", "atlan", "cohere", "langchain", "llamaindex", "pinecone", "weaviate",
+  "fireworks", "openai", "ramp", "perplexity", "elevenlabs", "cursor", "cerebras",
+  "baseten", "modal", "replit", "cognition", "harvey", "sierra", "decagon",
+  "dust", "supabase", "render", "railway", "deepgram", "prefect", "airbyte",
+  "hex", "neon", "sardine", "synthesia", "anyscale", "astronomer", "suno",
+  "pika", "sentry", "navi",
+]
 
 [sources.workable]
 enabled = true

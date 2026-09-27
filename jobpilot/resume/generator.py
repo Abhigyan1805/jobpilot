@@ -406,6 +406,12 @@ class ResumeGenerator:
                 name = rf"\textbf{{{name}}}"
             stack = latex_escape(self._clean_stack(entry.stack))
             heading = f"{name} $|$ \\emph{{{stack}}}" if stack else name
+            tagline = latex_escape(entry.tagline or "")
+            if tagline:
+                heading = (
+                    f"\\parbox[t]{{0.88\\textwidth}}{{\\baselineskip=11pt "
+                    f"{heading}\\\\\\emph{{{tagline}}}}}"
+                )
             year = latex_escape(entry.year or "")
             lines.append("      \\resumeProjectHeading")
             lines.append(f"          {{{heading}}}{{{year}}}")
