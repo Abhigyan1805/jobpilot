@@ -37,16 +37,41 @@ from jobpilot.models import JobPosting
 SEARCH_URL = "https://unstop.com/api/public/opportunity/search-result"
 PAGE_SIZE = 10
 
-#: Default ``searchTerm`` slices. Each was verified live to return real rows
-#: (e.g. "machine learning" ~619, "artificial intelligence" ~267,
-#: "data science" ~1826, "ai" ~2122, "software engineer" ~4380). Override with
+#: Default ``searchTerm`` slices. Each was verified live read-only on
+#: 2026-09-27 to return real rows; the parenthesised number is the *new*
+#: postings that slice contributed on its first two pages after de-duplication
+#: in that verification probe (keyword depth 2, generic feed 30 pages = 242;
+#: total 575; a later run's own counters differ slightly as inventory rotates):
+#: machine learning (20), artificial intelligence (19), ai (20), deep learning
+#: (9), ai ml (13), generative ai (18), llm (19), computer vision (19), nlp (11),
+#: ml engineer (17), ai engineer (16), data science (15), data analyst (17),
+#: data engineer (20), software engineer (20), software development (19),
+#: python (20), ai intern (12), ml intern (10), research intern (19).
+#: This set targets the captain's AI/ML/data/software field; the role-shaped
+#: ``* intern`` terms are precision slices that surface internships whose title
+#: does not contain a bare technology word. Override with
 #: ``[sources.unstop] keywords = [...]``.
 DEFAULT_KEYWORDS = (
     "machine learning",
     "artificial intelligence",
     "ai",
+    "deep learning",
+    "ai ml",
+    "generative ai",
+    "llm",
+    "computer vision",
+    "nlp",
+    "ml engineer",
+    "ai engineer",
     "data science",
+    "data analyst",
+    "data engineer",
     "software engineer",
+    "software development",
+    "python",
+    "ai intern",
+    "ml intern",
+    "research intern",
 )
 
 

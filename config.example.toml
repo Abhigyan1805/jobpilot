@@ -97,12 +97,38 @@ enabled = true
 # Unstop: India-native; robots.txt explicitly allows /api/public/*. The generic
 # internships feed is recency-sorted and non-technical-dominated, so the
 # server-side searchTerm keyword filter is run as well; the generic feed and one
-# query per keyword are merged and deduped by id. Override the keyword list:
+# query per keyword are merged and deduped by id. Each keyword below was verified
+# live read-only on 2026-09-27 to return real rows (the comment lists each
+# slice's *new* postings on its first two pages after dedupe in that probe;
+# generic feed 30 pages = 242; total 575; run-to-run counts drift slightly as
+# inventory rotates). The first page is saturated at 10 rows for every keyword,
+# so keyword_max_pages is 2. Override the keyword list:
 [sources.unstop]
 enabled = true
 max_pages = 2
-# keyword_max_pages = 1
-# keywords = ["machine learning", "artificial intelligence", "ai", "data science", "software engineer"]
+# keyword_max_pages = 2
+# keywords = [
+#   "machine learning",        # 20
+#   "artificial intelligence", # 19
+#   "ai",                      # 20
+#   "deep learning",           # 9
+#   "ai ml",                   # 13
+#   "generative ai",           # 18
+#   "llm",                     # 19
+#   "computer vision",         # 19
+#   "nlp",                     # 11
+#   "ml engineer",             # 17
+#   "ai engineer",             # 16
+#   "data science",            # 15
+#   "data analyst",            # 17
+#   "data engineer",           # 20
+#   "software engineer",       # 20
+#   "software development",    # 19
+#   "python",                  # 20
+#   "ai intern",               # 12
+#   "ml intern",               # 10
+#   "research intern",         # 19
+# ]
 
 # Workable's cross-company search (distinct from the per-account widget above).
 # Undocumented endpoint; keep request rates low (robots sets ai-train=no).
@@ -112,11 +138,12 @@ max_pages = 2
 
 # The Muse: free public API. A typed level=Internship query plus a broader
 # location=India query (the API ignores keyword params) are merged and deduped
-# by id, so the typed level facet is never the only discovery path.
+# by id, so the typed level facet is never the only discovery path. The typed
+# Internship facet has only ~4 pages, so max_pages=4 captures its full depth.
 # Note: its location=India parameter is loose; the hard location filter rechecks.
 [sources.themuse]
 enabled = true
-max_pages = 2
+max_pages = 4
 # broad_max_pages = 1
 
 # ---------------------------------------------------------------------------
