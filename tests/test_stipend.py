@@ -712,5 +712,61 @@ class StipendStateIsNotPersistedTests(unittest.TestCase):
                 store.close()
 
 
+class Page19StipendRegressionTests(unittest.TestCase):
+    """The six page-19 "stipend not stated" misses, from their real typed values.
+
+    Unstop publishes the stipend in a structured ``jobDetail`` block separate
+    from the description; ``discovery/unstop.py`` now appends it as the
+    ``Stipend: ...`` line below. Each line is the exact form that reaches the
+    parser for the real posting, and each must be confirmed below the ₹30k floor
+    (the captain's ground-truth numbers are the range maxima).
+    """
+
+    CASES = {
+        "Frugality Fintech - AI/ML & Data Analyst Internship": (
+            "Stipend: ₹8,000 - ₹12,000 per month",
+            12000,
+        ),
+        "FlatUIUX - AI/ML Engineer Internship": (
+            "Stipend: ₹7,000 - ₹12,000 per month",
+            12000,
+        ),
+        "AI Invito - Python Developer Internship": (
+            "Stipend: ₹1,000 - ₹5,000 per month",
+            5000,
+        ),
+        "Qveto - Python Developer Internship": (
+            "Stipend: ₹1,000 - ₹10,000 per month",
+            10000,
+        ),
+        "IntelleQAcademy - Python Development Internship": (
+            "Stipend: ₹10,000 - ₹20,000 per month",
+            20000,
+        ),
+        "IntelleQAcademy - Generative AI Internship": (
+            "Stipend: ₹10,000 - ₹20,000 per month",
+            20000,
+        ),
+    }
+
+    REAL_DESCRIPTION_TAIL = (
+        "Responsibilities of the Intern:\n"
+        "Contribute to the phase of the development lifecycle\n"
+        "Required skills: Machine Learning Concepts, Python\n"
+    )
+
+    def test_each_recovered_form_is_confirmed_below_floor(self):
+        for label, (line, expected_high) in self.CASES.items():
+            with self.subTest(label=label):
+                info = classify_stipend(self.REAL_DESCRIPTION_TAIL + line)
+                self.assertEqual(info.state, CONFIRMED_BELOW_FLOOR)
+                self.assertEqual(info.amount_high, expected_high)
+
+    def test_the_recovered_forms_are_dropped_not_shown_as_unstated(self):
+        for label, (line, _high) in self.CASES.items():
+            with self.subTest(label=label):
+                self.assertTrue(classify_stipend(line).dropped, label)
+
+
 if __name__ == "__main__":
     unittest.main()

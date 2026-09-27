@@ -52,6 +52,7 @@ def candidate(
     review_category="",
     review_reason="",
     parseability_ok=None,
+    open_state="",
 ):
     return ReviewCandidate(
         review_id=1,
@@ -66,6 +67,7 @@ def candidate(
         review_category=review_category,
         review_reason=review_reason,
         parseability_ok=parseability_ok,
+        open_state=open_state,
     )
 
 
@@ -619,6 +621,65 @@ class RenderTests(unittest.TestCase):
         reasons = " ".join(e.reason for e in selection.excluded)
         self.assertIn("below floor", reasons)
         self.assertIn("unpaid", reasons)
+
+    def test_unverified_open_state_is_marked_but_confirmed_open_is_not_flagged(self):
+        # A source that published no closure signal must not be presented as a
+        # confirmed-open posting: the card labels it unverified. A confirmed
+        # open posting is labelled open and carries no warning.
+        unverified = candidate(
+            posting(job_id="unverified-1", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            open_state="unverified",
+        )
+        confirmed = candidate(
+            posting(job_id="open-1", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            open_state="open",
+        )
+        selection = select_matches([unverified, confirmed], self.matcher, self.cfg)
+        self.assertEqual(len(selection.included), 2)
+
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Open state:</b> unverified", html)
+        self.assertIn("Open state:</b> confirmed open", html)
+
+    def test_rediscovered_closed_posting_is_not_presented_from_a_stale_queue(self):
+        # The page-19 failure against a preserved store: a posting queued while
+        # open is rediscovered and now judged closed. The pending review row is
+        # never pruned, so selection must consult the posting's current open
+        # state, not the queue row's mere presence.
+        store = Store(self.cfg.resolve(self.cfg.output.database))
+        try:
+            p = posting(job_id="closed-queue-1", title="Machine Learning Intern", description=ML_JD)
+            store.upsert_posting(p, eligible=True, open_state="open")
+            match = Matcher(mini_profile(), self.cfg).match(p)
+            plan = ApplicationPlan(posting=p, match=match)
+            plan.resume = GeneratedResume(pdf_path=str(self.resume))
+            plan.cover = GeneratedCoverLetter(pdf_path=str(self.cover))
+            store.enqueue_review(plan, packet_dir="")
+            # A later run rediscovers the same posting and now judges it closed.
+            store.upsert_posting(p, eligible=False, open_state="closed")
+            candidates = build_candidates(store)
+        finally:
+            store.close()
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].open_state, "closed")
+        selection = select_matches(candidates, self.matcher, self.cfg)
+        self.assertEqual(selection.included, [])
+        self.assertEqual(len(selection.excluded), 1)
+        self.assertIn("closed", selection.excluded[0].reason)
+
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("Machine Learning Intern", html)
 
     def test_run_present_reads_the_store_and_writes_the_page(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))

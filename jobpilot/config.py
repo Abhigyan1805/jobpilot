@@ -14,6 +14,20 @@ from pathlib import Path
 from typing import Any
 
 
+class ConfigError(Exception):
+    """A configured path cannot be resolved to an existing file."""
+
+
+def project_root() -> Path:
+    """The repository/project directory that contains the ``jobpilot`` package.
+
+    Shipped data files (``data/applied-postings.toml``) live here. Resolving
+    them from the package location - not from wherever the run-config happens to
+    sit - lets a config placed outside the repo still find the tracked data.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
 @dataclass
 class ProfileConfig:
     path: str = ""
@@ -471,6 +485,45 @@ class Config:
             return str(p)
         base = Path(self.base_dir) if self.base_dir else Path.cwd()
         return str((base / p).resolve())
+
+    def resolve_exclude_file(self) -> str | None:
+        """Resolve ``[filter].exclude_file`` or ``None`` when disabled.
+
+        A relative path is searched against the project it belongs to, not only
+        the directory the config happens to sit in, so a run-config placed
+        outside the repo still finds the shipped ``data/applied-postings.toml``
+        (a config-relative miss used to load *zero* exclusions silently, letting
+        already-applied postings reappear). Roots are tried in order - the output
+        dir's project, the config's directory, then the package/repo root - and a
+        configured path that resolves nowhere raises :class:`ConfigError` instead
+        of silently loading an empty list.
+        """
+        raw = (self.filter.exclude_file or "").strip()
+        if not raw:
+            return None
+        p = Path(raw)
+        if p.is_absolute():
+            if not p.exists():
+                raise ConfigError(f"[filter].exclude_file does not exist: {p}")
+            return str(p)
+
+        candidates: list[Path] = []
+        out_dir = Path(self.resolve(self.output.dir)) if self.output.dir else None
+        if out_dir is not None:
+            candidates.append(out_dir.parent / p)
+        if self.base_dir:
+            candidates.append(Path(self.base_dir) / p)
+        if self.config_path:
+            candidates.append(Path(self.config_path).resolve().parent / p)
+        candidates.append(project_root() / p)
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate.resolve())
+        raise ConfigError(
+            f"[filter].exclude_file {raw!r} was not found relative to the output "
+            f"project, the config directory, or the project root ({project_root()}); "
+            "set it to an existing file or to \"\" to disable exclusions"
+        )
 
     def source(self, name: str) -> SourceConfig | None:
         return self.sources.get(name)

@@ -3,7 +3,7 @@
 The list is a presentation/selection filter, never a deletion: it matches a
 re-discovery of the exact same posting by url or stable id/source+job_id, so a
 new posting from the same company with the same generic title is not hidden. The
-shipped ``data/applied-postings.toml`` carries the 45 from the current review
+shipped ``data/applied-postings.toml`` carries the 48 from the current review
 page.
 """
 
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from jobpilot.config import load_config
+from jobpilot.config import ConfigError, load_config
 from jobpilot.exclusions import ExclusionList, _norm_url
 from jobpilot.matching import Matcher
 from jobpilot.present import ReviewCandidate, select_matches
@@ -145,9 +145,9 @@ class ShippedListTests(unittest.TestCase):
         path = Path(__file__).resolve().parent.parent / "data" / "applied-postings.toml"
         return ExclusionList.load(path)
 
-    def test_shipped_list_has_the_45_applied_postings(self):
+    def test_shipped_list_has_the_48_applied_postings(self):
         entries = self._entries()
-        self.assertEqual(entries.count, 45)
+        self.assertEqual(entries.count, 48)
         # A known member of the page is excluded by its url on re-discovery.
         p = posting(source="unstop", job_id="99")
         p.url = "https://www.rubrik.com/company/careers/departments/job.8166523?gh_jid=8166523"
@@ -258,6 +258,49 @@ class DefaultExclusionFileTests(unittest.TestCase):
             )
             result = select_matches([c], matcher, cfg)
         self.assertEqual(len(result.included), 1)
+
+    def test_config_outside_the_repo_finds_the_shipped_applied_list(self):
+        # A run-config placed outside the repo (e.g. /tmp) must still resolve the
+        # relative default to the tracked data file. Resolving against the config
+        # directory alone silently loaded zero entries and let already-applied
+        # postings reappear on page 19.
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._config(tmp)  # no data/ beside this config
+            resolved = cfg.resolve_exclude_file()
+            self.assertIsNotNone(resolved)
+            self.assertTrue(Path(resolved).exists())
+            self.assertTrue(resolved.endswith("data/applied-postings.toml"))
+            entries = ExclusionList.load(resolved)
+            applied = posting(source="greenhouse", job_id="8166523")
+            applied.url = (
+                "https://www.rubrik.com/company/careers/departments/job.8166523?gh_jid=8166523"
+            )
+            self.assertIsNotNone(entries.match(applied))
+
+    def test_config_outside_the_repo_applies_the_shipped_list_in_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._config(tmp)  # no data/ beside this config
+            matcher = Matcher(mini_profile(), cfg)
+            applied = posting(
+                source="greenhouse",
+                job_id="8166523",
+                company="Rubrik Job Board",
+                title="Software Engineer - Winter Intern",
+                description=ML_JD,
+            )
+            applied.url = (
+                "https://www.rubrik.com/company/careers/departments/job.8166523?gh_jid=8166523"
+            )
+            result = select_matches([candidate(applied)], matcher, cfg)
+        self.assertEqual(result.included, [])
+        self.assertEqual(len(result.excluded), 1)
+        self.assertIn("already applied", result.excluded[0].reason)
+
+    def test_missing_configured_exclude_file_raises_instead_of_loading_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._config(tmp, '[filter]\nexclude_file = "data/nope-missing.toml"\n')
+            with self.assertRaises(ConfigError):
+                cfg.resolve_exclude_file()
 
 
 if __name__ == "__main__":

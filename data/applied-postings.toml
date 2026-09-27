@@ -272,3 +272,21 @@ source = "unstop"
 company = "Qveto"
 title = "Data Science and Machine Learning Internship"
 url = "https://unstop.com/internships/data-science-and-machine-learning-internship-qveto-1747163"
+
+[[applied]]
+source = "themuse"
+company = "Biogen"
+title = "Co-op, Data Science & AI Innovation"
+url = "https://www.themuse.com/jobs/biogen/coop-data-science-ai-innovation"
+
+[[applied]]
+source = "unstop"
+company = "PSYC Aerospace and Defence Industries Pvt. Ltd."
+title = "AI/ML & Test Engineering Internship"
+url = "https://unstop.com/internships/aiml-test-engineering-internship-psyc-aerospace-and-defence-industries-pvt-ltd-1757405"
+
+[[applied]]
+source = "unstop"
+company = "SmaranAI.in"
+title = "Junior AI Developer Internship (Deep Learning)"
+url = "https://unstop.com/internships/junior-ai-developer-internship-deep-learning-smaranaiin-1757474"

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS postings (
     description TEXT,
     is_remote INTEGER,
     eligible INTEGER,
+    open_state TEXT,
     window_label TEXT,
     window_confidence REAL,
     reject_reasons TEXT,
@@ -206,6 +207,8 @@ class Store:
             self.conn.execute("ALTER TABLE postings ADD COLUMN apply_email TEXT")
         if "deadline" not in posting_cols:
             self.conn.execute("ALTER TABLE postings ADD COLUMN deadline TEXT")
+        if "open_state" not in posting_cols:
+            self.conn.execute("ALTER TABLE postings ADD COLUMN open_state TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -219,6 +222,7 @@ class Store:
         window_label: str = "",
         window_confidence: float | None = None,
         reject_reasons: list[str] | None = None,
+        open_state: str = "",
     ) -> bool:
         """Insert or refresh a posting. Returns True when newly inserted."""
         now = utcnow()
@@ -228,9 +232,9 @@ class Store:
             INSERT INTO postings (
                 stable_id, source, job_id, company, title, url, apply_url, apply_email,
                 location, employment_type, published_at, deadline, description, is_remote,
-                eligible,
+                eligible, open_state,
                 window_label, window_confidence, reject_reasons, seen_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(stable_id) DO UPDATE SET
                 company=excluded.company,
                 title=excluded.title,
@@ -244,6 +248,7 @@ class Store:
                 description=excluded.description,
                 is_remote=excluded.is_remote,
                 eligible=COALESCE(excluded.eligible, postings.eligible),
+                open_state=COALESCE(NULLIF(excluded.open_state, ''), postings.open_state),
                 window_label=excluded.window_label,
                 window_confidence=excluded.window_confidence,
                 reject_reasons=COALESCE(excluded.reject_reasons, postings.reject_reasons),
@@ -265,6 +270,7 @@ class Store:
                 posting.description,
                 None if posting.is_remote is None else int(posting.is_remote),
                 None if eligible is None else int(eligible),
+                open_state or None,
                 window_label,
                 window_confidence,
                 json.dumps(reject_reasons) if reject_reasons is not None else None,
