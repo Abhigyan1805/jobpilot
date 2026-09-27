@@ -19,7 +19,7 @@ from jobpilot.resume.parseability import (
     check_parseability,
     extract_pdf_text,
 )
-from tests.helpers import posting, test_config
+from tests.helpers import mini_profile, posting, test_config
 
 REAL_PROFILE = "/mnt/d/LaTeX/resume/PROFILE.md"
 REAL_STYLE = "/mnt/d/LaTeX/resume/Abhigyan_Resume_AI_ML.tex"
@@ -179,6 +179,27 @@ class TailoringCompileTests(unittest.TestCase):
         profile = load_profile(REAL_PROFILE)
         validator = FactValidator(profile.raw_text)
         self.assertFalse(validator.is_clean("Scaled systems to 999999 users"))
+
+
+class ProjectTaglineRenderingTests(unittest.TestCase):
+    """A project heading's one-line description renders with the heading.
+
+    The profile parser keeps a project heading's em-dash description as
+    ``Entry.tagline``. It must reach every generated resume, wrapped so the
+    description line never overlaps the title/stack line (a tabular row sets
+    ``\\baselineskip`` to zero, so the tagline line sets its own leading).
+    """
+
+    def test_project_tagline_is_rendered_in_the_heading(self):
+        cfg = test_config()
+        profile = mini_profile()
+        gen = ResumeGenerator(profile, cfg)
+        p = posting(title="Machine Learning Intern", description="Python, RAG, evaluation.")
+        match = Matcher(profile, cfg).match(p)
+
+        body = gen.render(p, match).body
+
+        self.assertIn("routed retrieval benchmark", body)
 
 
 class ParseabilitySurfaceFormTests(unittest.TestCase):
