@@ -26,6 +26,7 @@ from jobpilot.discovery.workable import WorkableAdapter
 from jobpilot.discovery.workable_global import WorkableGlobalAdapter
 from jobpilot.filtering import filter_posting, review_only_reasons
 from jobpilot.http import FetchError
+from jobpilot.stipend import classify_stipend
 from jobpilot.store import Store
 from jobpilot.window import classify_window
 from tests.helpers import FakeAdapter, plan_for, test_config
@@ -396,6 +397,118 @@ class UnstopTests(unittest.TestCase):
         result = filter_posting(posting, cfg.filter)
         self.assertFalse(result.eligible)
         self.assertTrue(any("application_open" in r for r in result.reject_reasons))
+
+    def test_typed_stipend_is_carried_into_the_description(self):
+        # The page-19 below-floor postings stated their stipend only in Unstop's
+        # typed ``jobDetail`` block, which the description never carried, so the
+        # parser saw "stipend not stated". The board's own minutes now reach the
+        # parser. Values are the real jobDetail for AI Invito's Python Developer
+        # Internship (captain: "5k stipend").
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        row = {
+            **self.ROW,
+            "jobDetail": {
+                "min_salary": 1000,
+                "max_salary": 5000,
+                "currency": "fa-rupee",
+                "show_salary": 1,
+                "paid_unpaid": "paid",
+                "pay_in": "monthly",
+            },
+        }
+        posting = adapter._normalise(row)
+        info = classify_stipend(posting.description)
+        self.assertEqual(info.state, "confirmed_below_floor")
+        self.assertEqual(info.amount_high, 5000)
+
+    def test_typed_stipend_range_reaches_the_parser_for_each_real_form(self):
+        # The six page-19 below-floor postings' real typed ranges.
+        cases = [
+            ("Frugality Fintech", {"min_salary": 8000, "max_salary": 12000}, 12000),
+            ("FlatUIUX", {"min_salary": 7000, "max_salary": 12000}, 12000),
+            ("AI Invito", {"min_salary": 1000, "max_salary": 5000}, 5000),
+            ("Qveto", {"min_salary": 1000, "max_salary": 10000}, 10000),
+            ("IntelleQAcademy", {"min_salary": 10000, "max_salary": 20000}, 20000),
+        ]
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        for company, salary, expected_high in cases:
+            with self.subTest(company=company):
+                row = {
+                    **self.ROW,
+                    "organisation": {"name": company},
+                    "jobDetail": {
+                        **salary,
+                        "currency": "fa-rupee",
+                        "show_salary": 1,
+                        "paid_unpaid": "paid",
+                        "pay_in": "monthly",
+                    },
+                }
+                info = classify_stipend(adapter._normalise(row).description)
+                self.assertEqual(info.state, "confirmed_below_floor")
+                self.assertEqual(info.amount_high, expected_high)
+
+    def test_typed_stipend_at_or_above_floor_is_confirmed(self):
+        # Vortizo AI's Python Internship pays a flat INR 35,000/month.
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        row = {
+            **self.ROW,
+            "jobDetail": {
+                "min_salary": 35000,
+                "max_salary": 35000,
+                "currency": "fa-rupee",
+                "show_salary": 1,
+                "pay_in": "monthly",
+            },
+        }
+        info = classify_stipend(adapter._normalise(row).description)
+        self.assertEqual(info.state, "confirmed_ge_floor")
+        self.assertEqual(info.amount, 35000)
+
+    def test_undisclosed_or_unshown_salary_is_not_invented(self):
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        for job_detail in (
+            {"min_salary": 0, "max_salary": 0, "currency": "fa-rupee", "show_salary": 1},
+            {"min_salary": 5000, "max_salary": 8000, "currency": "fa-rupee", "show_salary": 0},
+            {
+                "min_salary": 5000,
+                "max_salary": 8000,
+                "currency": "fa-rupee",
+                "show_salary": 1,
+                "not_disclosed": True,
+            },
+        ):
+            with self.subTest(job_detail=job_detail):
+                row = {**self.ROW, "jobDetail": job_detail}
+                self.assertNotIn("Stipend", adapter._normalise(row).description)
+
+    def test_non_rupee_salary_is_not_read_as_inr(self):
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        row = {
+            **self.ROW,
+            "jobDetail": {
+                "min_salary": 5000,
+                "max_salary": 8000,
+                "currency": "usd",
+                "show_salary": 1,
+            },
+        }
+        self.assertNotIn("Stipend", adapter._normalise(row).description)
+
+    def test_unpaid_typed_stipend_is_carried_as_unpaid(self):
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        row = {
+            **self.ROW,
+            "jobDetail": {
+                "min_salary": 0,
+                "max_salary": 0,
+                "currency": "fa-rupee",
+                "show_salary": 1,
+                "paid_unpaid": "unpaid",
+            },
+        }
+        info = classify_stipend(adapter._normalise(row).description)
+        self.assertEqual(info.state, "unpaid")
 
     def test_typed_start_end_window_is_a_verified_in_window_range(self):
         cfg = test_config()

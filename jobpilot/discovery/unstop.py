@@ -37,6 +37,41 @@ from jobpilot.models import JobPosting
 SEARCH_URL = "https://unstop.com/api/public/opportunity/search-result"
 PAGE_SIZE = 10
 
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() not in {"", "0", "false", "no", "none", "null"}
+
+
+def _salary_amount(value) -> int | None:
+    """A positive integer salary from Unstop's numeric-or-string field."""
+    if value in (None, ""):
+        return None
+    try:
+        amount = int(float(str(value).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        return None
+    return amount if amount > 0 else None
+
+
+def _pay_period(value) -> str:
+    """A period phrase the stipend parser recognises; monthly is the default."""
+    text = str(value or "").strip().casefold()
+    if text.startswith("year") or text in {"annual", "annually", "annum", "pa", "p.a."}:
+        return "per annum"
+    if text.startswith("hour"):
+        return "per hour"
+    if text.startswith("day"):
+        return "per day"
+    if text.startswith("week"):
+        return "per week"
+    return "per month"
+
 #: Default ``searchTerm`` slices. Each was verified live read-only on
 #: 2026-09-27 to return real rows; the parenthesised number is the *new*
 #: postings that slice contributed on its first two pages after de-duplication
@@ -186,6 +221,9 @@ class UnstopAdapter(SourceAdapter):
             parts.append(details)
         if skills:
             parts.append("Required skills: " + ", ".join(skills))
+        stipend = self._stipend_text(row.get("jobDetail"))
+        if stipend:
+            parts.append(stipend)
 
         subtype = str(row.get("subtype") or "")
         employment_type = "Internship" if subtype == "internships" else str(row.get("type") or "")
@@ -204,6 +242,42 @@ class UnstopAdapter(SourceAdapter):
             is_remote=("online" in region.lower() or "remote" in region.lower()) or None,
             raw=row,
         )
+
+    @staticmethod
+    def _stipend_text(job_detail) -> str:
+        """Format Unstop's typed salary block as a stipend line the parser reads.
+
+        Unstop publishes the stipend as structured ``jobDetail`` fields
+        (``min_salary``/``max_salary``/``currency``/``pay_in``), separate from the
+        description, so a plainly-stated monthly amount was invisible to the
+        stipend parser and landed in the "not stated" bucket. Emitting it here in
+        the same surface form the parser already understands ("Stipend: INR
+        8,000 - 12,000 per month") lets the monthly floor judge it, without
+        inventing anything: the figure and period are the board's own.
+        """
+        if not isinstance(job_detail, dict):
+            return ""
+        if "show_salary" in job_detail and not _truthy(job_detail.get("show_salary")):
+            return ""
+        if _truthy(job_detail.get("not_disclosed")):
+            return ""
+        paid = str(job_detail.get("paid_unpaid") or "").strip().lower()
+        if paid in {"unpaid", "not_paid", "no", "false", "0"}:
+            return "Stipend: Unpaid"
+        currency = str(job_detail.get("currency") or "").strip().casefold()
+        if currency and "rupee" not in currency and "inr" not in currency:
+            # Never invent rupees for a posting the board denominates otherwise.
+            return ""
+        low = _salary_amount(job_detail.get("min_salary"))
+        high = _salary_amount(job_detail.get("max_salary"))
+        if low is None and high is None:
+            return ""
+        period = _pay_period(job_detail.get("pay_in"))
+        if low is not None and high is not None and low != high:
+            figure = f"₹{low:,} - ₹{high:,}"
+        else:
+            figure = f"₹{low if low is not None else high:,}"
+        return f"Stipend: {figure} {period}"
 
     @staticmethod
     def _location(region: str, locations) -> str:

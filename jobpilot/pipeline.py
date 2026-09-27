@@ -17,6 +17,7 @@ from jobpilot.filtering import filter_posting
 from jobpilot.lexicon import present_surface_forms
 from jobpilot.matching import Matcher
 from jobpilot.models import ApplicationPlan, JobPosting
+from jobpilot.openstate import assess_open_state
 from jobpilot.profile import load_profile
 from jobpilot.resume.compiler import CompileError, compile_tex
 from jobpilot.resume.generator import ContentInvariantError, ResumeGenerator
@@ -96,6 +97,7 @@ def run_pipeline(
                     window_label=fr.window_label,
                     window_confidence=fr.window_confidence,
                     reject_reasons=fr.reject_reasons,
+                    open_state=assess_open_state(posting).key,
                 )
                 if not fr.eligible:
                     continue
@@ -201,6 +203,7 @@ def run_manual_pipeline(
             window_label=fr.window_label,
             window_confidence=fr.window_confidence,
             reject_reasons=fr.reject_reasons,
+            open_state=assess_open_state(posting).key,
         )
         if not fr.eligible:
             stats["reject_reasons"] = fr.reject_reasons

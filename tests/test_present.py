@@ -52,6 +52,7 @@ def candidate(
     review_category="",
     review_reason="",
     parseability_ok=None,
+    open_state="",
 ):
     return ReviewCandidate(
         review_id=1,
@@ -66,6 +67,7 @@ def candidate(
         review_category=review_category,
         review_reason=review_reason,
         parseability_ok=parseability_ok,
+        open_state=open_state,
     )
 
 
@@ -619,6 +621,33 @@ class RenderTests(unittest.TestCase):
         reasons = " ".join(e.reason for e in selection.excluded)
         self.assertIn("below floor", reasons)
         self.assertIn("unpaid", reasons)
+
+    def test_unverified_open_state_is_marked_but_confirmed_open_is_not_flagged(self):
+        # A source that published no closure signal must not be presented as a
+        # confirmed-open posting: the card labels it unverified. A confirmed
+        # open posting is labelled open and carries no warning.
+        unverified = candidate(
+            posting(job_id="unverified-1", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            open_state="unverified",
+        )
+        confirmed = candidate(
+            posting(job_id="open-1", title="Machine Learning Intern", description=ML_JD),
+            matched=["Python", "RAG"],
+            resume=str(self.resume),
+            cover=str(self.cover),
+            open_state="open",
+        )
+        selection = select_matches([unverified, confirmed], self.matcher, self.cfg)
+        self.assertEqual(len(selection.included), 2)
+
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Open state:</b> unverified", html)
+        self.assertIn("Open state:</b> confirmed open", html)
 
     def test_run_present_reads_the_store_and_writes_the_page(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))

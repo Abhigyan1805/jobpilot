@@ -1,15 +1,16 @@
 """Tests for the shared application open-state decision.
 
 Unstop marked rows ``LIVE`` while their application was closed; the decision
-must reject on a falsy ``regn_open``, a past ``end_date``, closed posting text,
-or a stated past deadline (for every adapter), while treating a missing end date
-or missing registration metadata as unverified - never closed.
+must reject on a falsy ``regn_open``, a past registration close (the nested
+``regnRequirements.end_regn_dt``), a past ``end_date``, closed posting text, or a
+stated past deadline (for every adapter), while treating a missing end date or
+missing registration metadata as unverified - never closed.
 """
 
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime
 
 from jobpilot.filtering import filter_posting, open_state_check
 from jobpilot.openstate import OpenState, assess_open_state
@@ -96,6 +97,137 @@ class AssessOpenStateTests(unittest.TestCase):
         )
         state = assess_open_state(p, today=TODAY)
         self.assertFalse(state.closed)
+
+
+class UnstopRegistrationWindowTests(unittest.TestCase):
+    """The registration window Unstop keeps separate from the internship window.
+
+    Page 19's five "application closed" misses all carried a future-looking
+    ``end_date`` (the internship end) with ``status="LIVE"`` and
+    ``regn_open=1``; their registration close (``regnRequirements.end_regn_dt``)
+    had already passed. The real window, not ``status``, decides.
+    """
+
+    #: The page-19 closed postings' real typed values, probed live 2026-09-27.
+    CLOSED_ROWS = {
+        "Deep Variance Inc": {
+            "id": 1755818,
+            "regn_open": 1,
+            "status": "LIVE",
+            "end_date": "2026-09-29T23:59:59+05:30",
+            "regnRequirements": {"end_regn_dt": "2026-09-15T11:42:19+05:30"},
+        },
+        "Prism Labs": {
+            "id": 1755179,
+            "regn_open": 1,
+            "status": "LIVE",
+            "end_date": "2026-09-27T00:00:00+05:30",
+            "regnRequirements": {"end_regn_dt": "2026-09-13T21:56:03+05:30"},
+        },
+        "Kisan Udyog": {
+            "id": 1754733,
+            "regn_open": 1,
+            "status": "LIVE",
+            "end_date": "2026-09-27T13:21:43+05:30",
+            "regnRequirements": {"end_regn_dt": "2026-09-27T13:21:43+05:30"},
+        },
+        "Zenotalent": {
+            "id": 1756492,
+            "regn_open": 1,
+            "status": "LIVE",
+            "end_date": "2026-09-30T23:59:59+05:30",
+            "regnRequirements": {"end_regn_dt": "2026-09-22T16:20:20+05:30"},
+        },
+    }
+
+    def test_each_named_closed_posting_is_rejected_despite_status_live(self):
+        # Reviewed 2026-09-27; Kisan Udyog closed 2026-09-27 13:21, so judge on
+        # the following day to be unambiguous for every named posting.
+        reviewed = date(2026, 9, 28)
+        for company, raw in self.CLOSED_ROWS.items():
+            with self.subTest(company=company):
+                p = posting(source="unstop", job_id=str(raw["id"]), company=company)
+                p.raw = raw
+                state = assess_open_state(p, today=reviewed)
+                self.assertTrue(state.closed, company)
+                self.assertIn("registration closed", state.reason)
+
+    def test_nested_registration_window_is_read(self):
+        p = _unstop(
+            regn_open=1,
+            end_date=FUTURE,
+            regnRequirements={"start_regn_dt": "2026-01-01T00:00:00+05:30",
+                              "end_regn_dt": PAST},
+        )
+        state = assess_open_state(p, today=TODAY)
+        self.assertTrue(state.closed)
+        self.assertIn(PAST, state.reason)
+
+    def test_future_registration_close_with_status_live_is_open(self):
+        # Vortizo AI's Python Internship: live row, future registration close,
+        # no closure signal - it must stay open, not be falsely closed.
+        p = _unstop(
+            regn_open=1,
+            status="LIVE",
+            end_date="2026-10-07T23:59:59+05:30",
+            regnRequirements={"end_regn_dt": "2026-10-07T23:59:59+05:30"},
+        )
+        state = assess_open_state(p, today=TODAY)
+        self.assertIs(state.open, True)
+        self.assertEqual(state.key, "open")
+
+    def test_future_registration_start_is_not_yet_open(self):
+        p = _unstop(
+            regn_open=1,
+            regnRequirements={"start_regn_dt": FUTURE, "end_regn_dt": FUTURE},
+        )
+        state = assess_open_state(p, today=TODAY)
+        self.assertTrue(state.closed)
+        self.assertIn("registration opens later", state.reason)
+
+    def test_registration_close_is_read_from_the_flat_payload_too(self):
+        p = _unstop(regn_open=1, end_regn_dt=PAST)
+        state = assess_open_state(p, today=TODAY)
+        self.assertTrue(state.closed)
+
+    def test_registration_close_earlier_today_is_already_closed(self):
+        # Kisan Udyog's Python Developer Internship closed 2026-09-27 13:21 and
+        # was still shown the same afternoon; a date-only compare would call it
+        # open all day. The time of day decides.
+        p = _unstop(
+            regn_open=1,
+            end_date="2026-09-27T13:21:43+05:30",
+            regnRequirements={"end_regn_dt": "2026-09-27T13:21:43+05:30"},
+        )
+        state = assess_open_state(p, now=datetime(2026, 9, 27, 14, 54))
+        self.assertTrue(state.closed)
+        self.assertIn("registration closed", state.reason)
+
+    def test_registration_close_later_today_is_still_open(self):
+        p = _unstop(
+            regn_open=1,
+            regnRequirements={"end_regn_dt": "2026-09-27T23:59:59+05:30"},
+        )
+        state = assess_open_state(p, now=datetime(2026, 9, 27, 14, 54))
+        self.assertIs(state.open, True)
+
+    def test_open_state_key_reflects_open_closed_unverified(self):
+        self.assertEqual(OpenState(True).key, "open")
+        self.assertEqual(OpenState(False).key, "closed")
+        self.assertEqual(OpenState(None).key, "unverified")
+
+    def test_filter_rejects_a_past_registration_close(self):
+        cfg = test_config()
+        p = posting(source="unstop", job_id="regn-closed", company="Deep Variance Inc")
+        p.raw = {
+            "regn_open": 1,
+            "status": "LIVE",
+            "end_date": "2026-09-29T23:59:59+05:30",
+            "regnRequirements": {"end_regn_dt": "2026-09-15T11:42:19+05:30"},
+        }
+        result = filter_posting(p, cfg.filter)
+        self.assertFalse(result.eligible)
+        self.assertTrue(any("application_open" in r for r in result.reject_reasons))
 
 
 class FilterIntegrationTests(unittest.TestCase):

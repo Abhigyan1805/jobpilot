@@ -64,6 +64,7 @@ class ReviewCandidate:
     page_count: int = 0
     page_limit: int = 0
     parseability_ok: bool | None = None
+    open_state: str = ""
 
     @property
     def company(self) -> str:
@@ -180,6 +181,7 @@ def build_candidates(store: Store) -> list[ReviewCandidate]:
                 page_count=int(row["resume_pages"] or 0),
                 page_limit=int(row["resume_page_limit"] or 0),
                 parseability_ok=parseability_ok,
+                open_state=posting_row["open_state"] or "",
             )
         )
     return candidates
@@ -270,11 +272,16 @@ def _classify_route(candidate: ReviewCandidate, config: Config) -> tuple[str, st
 
 
 def _exclusions_for(config: Config) -> ExclusionList:
-    """Load the configured already-applied list; an unset path means none."""
-    path = (config.filter.exclude_file or "").strip()
+    """Load the configured already-applied list; an unset path means none.
+
+    ``resolve_exclude_file`` searches the project rather than only the config
+    directory and raises if a configured file cannot be found, so a run-config
+    outside the repo cannot silently load zero exclusion entries.
+    """
+    path = config.resolve_exclude_file()
     if not path:
         return ExclusionList()
-    return ExclusionList.load(config.resolve(path))
+    return ExclusionList.load(path)
 
 
 def select_matches(
@@ -575,6 +582,25 @@ def _parseability_note(candidate: ReviewCandidate) -> str:
     )
 
 
+def _open_state_span(candidate: ReviewCandidate) -> str:
+    """Mark the card's application-open state, never claiming an unverified pass.
+
+    A posting whose source published a closure signal is shown as confirmed
+    open. A posting whose source published none stays ``unverified`` (the
+    pipeline never drops it for missing information) but is labelled here, so
+    the card does not present an unknown state as if it were confirmed open.
+    """
+    state = (candidate.open_state or "").strip().lower()
+    if state == "open":
+        return '<span><b>Open state:</b> confirmed open</span>'
+    if state == "unverified":
+        return (
+            '<span class="open-unverified"><b>Open state:</b> unverified - '
+            "the source published no closure signal; confirm it is still open</span>"
+        )
+    return ""
+
+
 def _presented_matches(selection: SelectionResult) -> list[PresentMatch]:
     return [*selection.included, *selection.borderline]
 
@@ -672,6 +698,7 @@ def _render_card(
         <span><b>Source:</b> {_esc(c.posting.source)}</span>
         <span><b>Technical relevance:</b> {match.technical_relevance:.2f}{_esc(f" ({match.best_domain})" if match.best_domain else "")}</span>
         <span><b>Stipend:</b> {_esc(match.stipend.display_label())}</span>
+        {_open_state_span(c)}
       </div>
       <div class="chips"><span class="chip">{_esc(domains or "no target domains")}</span></div>
       {_badge_row(c)}
