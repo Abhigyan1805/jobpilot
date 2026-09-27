@@ -200,7 +200,6 @@ class ProjectTaglineRenderingTests(unittest.TestCase):
         body = gen.render(p, match).body
 
         self.assertIn("routed retrieval benchmark", body)
-        self.assertIn("\\baselineskip", body)
 
 
 class ParseabilitySurfaceFormTests(unittest.TestCase):

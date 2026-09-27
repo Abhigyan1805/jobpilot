@@ -40,9 +40,12 @@ database = "jobpilot.db"
 #   greenhouse  https://boards-api.greenhouse.io/v1/boards/<token>/jobs
 #   lever       https://api.lever.co/v0/postings/<token>?mode=json
 #   ashby       https://api.ashbyhq.com/posting-api/job-board/<token>
-# Note: api.ashbyhq.com/robots.txt returns HTTP 401, so the enforced robots gate
-# fails closed and Ashby tokens are not fetched at run time; the greenhouse and
-# lever boards are. Drop the Ashby list if that host stays unreadable.
+# The greenhouse and lever boards were expanded on 2026-09-27 (43 greenhouse + 10
+# lever tokens; e.g. affirm 180, anthropic 618, spotify 79, qonto 38 postings at
+# probe time). Note: api.ashbyhq.com/robots.txt returns HTTP 401 for every user
+# agent and the enforced robots gate fails closed with no override, so the Ashby
+# source is skipped at run time. The Ashby set below is the originally-verified
+# 8 and no new Ashby tokens were added; unfetchable tokens add no companies.
 # ---------------------------------------------------------------------------
 [sources.greenhouse]
 enabled = true
@@ -57,22 +60,24 @@ tokens = [
   "hackerrank", "gleanwork", "newrelic", "yugabyte", "honeycomb", "pingcap",
   "mixpanel", "algolia", "discord", "gusto", "intercom", "amplitude",
   "netlify", "cockroachlabs", "asana", "udemy", "coursera", "chime",
+  "lyft", "roblox", "duolingo", "adyen", "cabify", "dataiku", "labelbox",
+  "snorkelai", "assemblyai", "truecaller", "launchdarkly", "pagerduty",
+  "gemini", "block", "brex",
 ]
 
 [sources.lever]
 enabled = true
-tokens = ["paytm", "zeta", "mindtickle", "meesho", "cred", "spotify", "toptal", "porter", "aircall"]
+tokens = [
+  "paytm", "zeta", "mindtickle", "meesho", "cred", "spotify", "toptal", "porter",
+  "aircall", "qonto", "swile", "blablacar", "contentsquare", "superside", "matillion",
+]
 
+# Left at the originally-verified set. api.ashbyhq.com/robots.txt returns HTTP
+# 401 and the enforced robots gate fails closed with no override, so this source
+# is skipped at run time regardless of the token list; no new tokens were added.
 [sources.ashby]
 enabled = true
-tokens = [
-  "sarvam", "atlan", "cohere", "langchain", "llamaindex", "pinecone", "weaviate",
-  "fireworks", "openai", "ramp", "perplexity", "elevenlabs", "cursor", "cerebras",
-  "baseten", "modal", "replit", "cognition", "harvey", "sierra", "decagon",
-  "dust", "supabase", "render", "railway", "deepgram", "prefect", "airbyte",
-  "hex", "neon", "sardine", "synthesia", "anyscale", "astronomer", "suno",
-  "pika", "sentry", "navi",
-]
+tokens = ["sarvam", "atlan", "cohere", "langchain", "llamaindex", "pinecone", "weaviate", "fireworks"]
 
 [sources.workable]
 enabled = true
