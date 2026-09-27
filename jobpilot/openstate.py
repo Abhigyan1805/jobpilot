@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 
 from jobpilot.deadline import deadline_status, extract_deadline, parse_iso_deadline
 
@@ -56,21 +56,24 @@ _FALSY = {"", "0", "false", "no", "none", "null"}
 
 #: An ISO date or datetime, used for Unstop's registration window. The time is
 #: kept when the board states one (a registration close earlier *today* has
-#: passed), while a date-only value is compared at midnight.
+#: passed), while a date-only value is compared at midnight. A trailing UTC
+#: offset is captured and applied, so the comparison does not depend on the
+#: host's timezone.
 _ISO_DATETIME_RE = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?"
+    r"\s*(Z|[+-]\d{2}:?\d{2})?"
 )
 
 
 def _parse_registration_dt(value) -> datetime | None:
-    """Parse Unstop's registration-window timestamp, keeping any time of day."""
+    """Parse Unstop's registration-window timestamp, keeping time and offset."""
     if not isinstance(value, str):
         return None
     match = _ISO_DATETIME_RE.match(value.strip())
     if not match:
         return None
     try:
-        return datetime(
+        parsed = datetime(
             int(match.group(1)),
             int(match.group(2)),
             int(match.group(3)),
@@ -80,6 +83,25 @@ def _parse_registration_dt(value) -> datetime | None:
         )
     except ValueError:
         return None
+    offset = match.group(7)
+    return _apply_offset(parsed, offset)
+
+
+def _apply_offset(parsed: datetime, offset: str | None) -> datetime:
+    """Attach the board's UTC offset to a naive timestamp, when it states one."""
+    if not offset:
+        return parsed
+    if offset.upper() == "Z":
+        return parsed.replace(tzinfo=timezone.utc)
+    sign = 1 if offset[0] == "+" else -1
+    digits = offset[1:].replace(":", "")
+    delta = timedelta(hours=int(digits[:2]), minutes=int(digits[2:4]))
+    return parsed.replace(tzinfo=timezone(sign * delta))
+
+
+def _utc_naive(value: datetime) -> datetime:
+    """Normalise any datetime to naive UTC (a naive value is read as host-local)."""
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -152,18 +174,24 @@ def assess_open_state(posting, *, today: date | None = None, now: datetime | Non
     if "regn_open" in raw and not _truthy(raw.get("regn_open")):
         return OpenState(False, "registration is not open (regn_open is false)")
 
+    now_utc = _utc_naive(now)
     regn_start, regn_end = _registration_window(raw)
-    if unstop_typed and regn_end is not None and regn_end < now:
-        return OpenState(False, f"registration closed {regn_end.isoformat()}")
-    if unstop_typed and regn_start is not None and regn_start > now:
+    # Only a parsed close date in the future is a positive open signal. A bare
+    # ``regn_open=1`` - the exact flag page 19 proved untrustworthy - is not.
+    confirmed_open = False
+    if unstop_typed and regn_end is not None:
+        if _utc_naive(regn_end) < now_utc:
+            return OpenState(False, f"registration closed {regn_end.isoformat()}")
+        confirmed_open = True
+    if unstop_typed and regn_start is not None and _utc_naive(regn_start) > now_utc:
         return OpenState(False, f"registration opens later ({regn_start.isoformat()})")
     if unstop_typed and "end_date" in raw:
         end_date = parse_iso_deadline(raw.get("end_date"))
-        if end_date is not None and end_date < today:
-            return OpenState(False, f"registration ended {end_date.isoformat()}")
-    if unstop_typed and any(
-        key in raw for key in ("regn_open", "end_date", "end_regn_dt", "start_regn_dt", "regnRequirements")
-    ):
+        if end_date is not None:
+            if end_date < today:
+                return OpenState(False, f"registration ended {end_date.isoformat()}")
+            confirmed_open = True
+    if confirmed_open:
         return OpenState(True, "")
 
     return OpenState(None, "")

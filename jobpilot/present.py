@@ -298,6 +298,11 @@ def select_matches(
     exclusion list are dropped outright, and postings whose stipend is confirmed
     below the floor or explicitly unpaid are dropped. A posting whose stipend is
     merely ``unstated`` is kept - the renderer shows it in a separate section.
+
+    The stored open state is authoritative over the review queue: a posting the
+    pipeline has since judged closed is dropped even while its ``review_queue``
+    row is still pending, so a preserved store cannot re-present a closed
+    posting.
     """
     present = config.present
     result = SelectionResult()
@@ -305,6 +310,10 @@ def select_matches(
     exclusions = _exclusions_for(config)
 
     for candidate in candidates:
+        if (candidate.open_state or "").strip().lower() == "closed":
+            result.excluded.append(ExcludedCandidate(candidate, "posting is closed"))
+            continue
+
         entry = exclusions.match(candidate.posting)
         if entry is not None:
             result.excluded.append(

@@ -27,6 +27,7 @@ the returned set.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlencode
 
 from jobpilot.discovery.base import SourceAdapter, string_list
@@ -60,17 +61,29 @@ def _salary_amount(value) -> int | None:
 
 
 def _pay_period(value) -> str:
-    """A period phrase the stipend parser recognises; monthly is the default."""
+    """A period phrase the stipend parser recognises; ``""`` when unrecognised.
+
+    Unstop spells the period both ways (``monthly`` and ``Per Month``, ``yearly``
+    and ``Per Year``). A missing period defaults to monthly, but an explicit
+    non-monthly or unrecognised period must never be read as monthly: returning
+    ``""`` makes the caller leave the stipend unstated instead of promoting a
+    below-floor annual/hourly figure to the monthly floor.
+    """
     text = str(value or "").strip().casefold()
-    if text.startswith("year") or text in {"annual", "annually", "annum", "pa", "p.a."}:
+    if not text:
+        return "per month"
+    unit = re.split(r"[\s/]+", text)[-1].rstrip(".")
+    if unit in {"month", "months", "monthly", "mo", "pcm"}:
+        return "per month"
+    if unit in {"year", "years", "yearly", "annual", "annually", "annum", "pa", "p.a"}:
         return "per annum"
-    if text.startswith("hour"):
+    if unit in {"hour", "hours", "hourly", "hr", "hrs"}:
         return "per hour"
-    if text.startswith("day"):
+    if unit in {"day", "days", "daily"}:
         return "per day"
-    if text.startswith("week"):
+    if unit in {"week", "weeks", "weekly", "wk", "wks"}:
         return "per week"
-    return "per month"
+    return ""
 
 #: Default ``searchTerm`` slices. Each was verified live read-only on
 #: 2026-09-27 to return real rows; the parenthesised number is the *new*
@@ -273,6 +286,11 @@ class UnstopAdapter(SourceAdapter):
         if low is None and high is None:
             return ""
         period = _pay_period(job_detail.get("pay_in"))
+        if not period:
+            # An explicit period the parser cannot read (per semester, quarterly,
+            # ...) is not confirmable monthly: leave the stipend unstated rather
+            # than silently claiming a monthly figure.
+            return ""
         if low is not None and high is not None and low != high:
             figure = f"₹{low:,} - ₹{high:,}"
         else:

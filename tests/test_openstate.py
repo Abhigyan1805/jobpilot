@@ -10,7 +10,7 @@ missing registration metadata as unverified - never closed.
 from __future__ import annotations
 
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 from jobpilot.filtering import filter_posting, open_state_check
 from jobpilot.openstate import OpenState, assess_open_state
@@ -46,9 +46,20 @@ class AssessOpenStateTests(unittest.TestCase):
         state = assess_open_state(_unstop(regn_open=1, end_date=FUTURE), today=TODAY)
         self.assertIs(state.open, True)
 
-    def test_unknown_end_date_is_open_but_unverified(self):
+    def test_regn_open_without_a_window_is_unverified_not_open(self):
+        # ``regn_open=1`` alone is the page-19 flag that stayed set on closed
+        # postings; with no parseable window it confirms nothing, so the state
+        # must be unverified rather than a claimed open.
         state = assess_open_state(_unstop(regn_open=1), today=TODAY)
-        self.assertIs(state.open, True)
+        self.assertIsNone(state.open)
+        self.assertFalse(state.closed)
+        self.assertEqual(state.key, "unverified")
+
+    def test_regn_open_with_empty_registration_requirements_is_unverified(self):
+        # The concrete page-19 shape: a registration key present but no window.
+        state = assess_open_state(_unstop(regn_open=1, regnRequirements={}), today=TODAY)
+        self.assertIsNone(state.open)
+        self.assertFalse(state.closed)
 
     def test_past_end_date_without_regn_open_is_still_closed(self):
         # The spec rejects on a past end_date directly, not only when regn_open
@@ -210,6 +221,31 @@ class UnstopRegistrationWindowTests(unittest.TestCase):
         )
         state = assess_open_state(p, now=datetime(2026, 9, 27, 14, 54))
         self.assertIs(state.open, True)
+
+    def test_registration_close_applies_its_stated_offset(self):
+        # 2026-09-27T13:21:43+05:30 is 07:51:43 UTC. At an explicit 08:00 UTC the
+        # close has passed even though the wall-clock 13:21 reads as future - the
+        # offset is applied, not dropped.
+        p = _unstop(
+            regn_open=1,
+            regnRequirements={"end_regn_dt": "2026-09-27T13:21:43+05:30"},
+        )
+        state = assess_open_state(p, now=datetime(2026, 9, 27, 8, 0, tzinfo=timezone.utc))
+        self.assertTrue(state.closed)
+
+    def test_registration_close_verdict_is_host_timezone_independent(self):
+        # The same instant expressed as UTC and as IST must decide identically.
+        p = _unstop(
+            regn_open=1,
+            regnRequirements={"end_regn_dt": "2026-09-27T13:21:43+05:30"},
+        )
+        utc = assess_open_state(p, now=datetime(2026, 9, 27, 8, 0, tzinfo=timezone.utc))
+        ist = assess_open_state(
+            p,
+            now=datetime(2026, 9, 27, 13, 30, tzinfo=timezone(timedelta(hours=5, minutes=30))),
+        )
+        self.assertEqual(utc.closed, ist.closed)
+        self.assertTrue(utc.closed)
 
     def test_open_state_key_reflects_open_closed_unverified(self):
         self.assertEqual(OpenState(True).key, "open")

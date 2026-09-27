@@ -510,6 +510,47 @@ class UnstopTests(unittest.TestCase):
         info = classify_stipend(adapter._normalise(row).description)
         self.assertEqual(info.state, "unpaid")
 
+    def test_annual_typed_stipend_is_not_read_as_monthly(self):
+        # Unstop's ``pay_in`` arrives with a ``per `` prefix ("Per Year"), which
+        # used to fall through to the monthly default: a ₹3,00,000 annual package
+        # was shown as ₹3,00,000/month and cleared the ₹30k floor. It is really
+        # ~₹25,000/month, so it must be confirmed below the floor, not above.
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        row = {
+            **self.ROW,
+            "jobDetail": {
+                "min_salary": 300000,
+                "max_salary": 300000,
+                "currency": "fa-rupee",
+                "show_salary": 1,
+                "pay_in": "Per Year",
+            },
+        }
+        description = adapter._normalise(row).description
+        info = classify_stipend(description)
+        self.assertEqual(info.state, "confirmed_below_floor")
+        self.assertEqual(info.amount, 25000)
+
+    def test_non_monthly_and_unrecognised_pay_periods_never_confirm_monthly(self):
+        # An explicit period that cannot be read as monthly must leave the
+        # stipend unstated (or below-floor), never silently monthly: the same
+        # ₹3,00,000 figure must never be classified as clearing the monthly floor.
+        adapter = UnstopAdapter(_source(test_config(), "unstop"), test_config())
+        for pay_in in ("Per Hour", "Per Day", "Per Week", "Per Semester", "quarterly"):
+            with self.subTest(pay_in=pay_in):
+                row = {
+                    **self.ROW,
+                    "jobDetail": {
+                        "min_salary": 300000,
+                        "max_salary": 300000,
+                        "currency": "fa-rupee",
+                        "show_salary": 1,
+                        "pay_in": pay_in,
+                    },
+                }
+                info = classify_stipend(adapter._normalise(row).description)
+                self.assertNotEqual(info.state, "confirmed_ge_floor", pay_in)
+
     def test_typed_start_end_window_is_a_verified_in_window_range(self):
         cfg = test_config()
         adapter = UnstopAdapter(_source(cfg, "unstop"), cfg)

@@ -649,6 +649,38 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Open state:</b> unverified", html)
         self.assertIn("Open state:</b> confirmed open", html)
 
+    def test_rediscovered_closed_posting_is_not_presented_from_a_stale_queue(self):
+        # The page-19 failure against a preserved store: a posting queued while
+        # open is rediscovered and now judged closed. The pending review row is
+        # never pruned, so selection must consult the posting's current open
+        # state, not the queue row's mere presence.
+        store = Store(self.cfg.resolve(self.cfg.output.database))
+        try:
+            p = posting(job_id="closed-queue-1", title="Machine Learning Intern", description=ML_JD)
+            store.upsert_posting(p, eligible=True, open_state="open")
+            match = Matcher(mini_profile(), self.cfg).match(p)
+            plan = ApplicationPlan(posting=p, match=match)
+            plan.resume = GeneratedResume(pdf_path=str(self.resume))
+            plan.cover = GeneratedCoverLetter(pdf_path=str(self.cover))
+            store.enqueue_review(plan, packet_dir="")
+            # A later run rediscovers the same posting and now judges it closed.
+            store.upsert_posting(p, eligible=False, open_state="closed")
+            candidates = build_candidates(store)
+        finally:
+            store.close()
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].open_state, "closed")
+        selection = select_matches(candidates, self.matcher, self.cfg)
+        self.assertEqual(selection.included, [])
+        self.assertEqual(len(selection.excluded), 1)
+        self.assertIn("closed", selection.excluded[0].reason)
+
+        html = render_page(selection, self.cfg, Path(self.tmp.name) / "present").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("Machine Learning Intern", html)
+
     def test_run_present_reads_the_store_and_writes_the_page(self):
         store = Store(self.cfg.resolve(self.cfg.output.database))
         try:
